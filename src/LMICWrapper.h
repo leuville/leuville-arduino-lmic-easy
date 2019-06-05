@@ -13,6 +13,7 @@
 #include <lmic.h>
 #include <lmic/oslmic.h>
 #include <hal/hal.h>
+
 #include <SPI.h>
 
 #include <pb_encode.h>
@@ -110,6 +111,9 @@ public:
 		return (LMIC.opmode & OP_TXRXPEND);
 	}
 
+	/*
+	 * Returns true if TX buffer contains data for sending
+	 */
 	boolean isTxDataPending() {
 		return (LMIC.opmode & OP_TXDATA);
 	}
@@ -121,6 +125,7 @@ protected:
 	// LoRaWAN environment
 	const LoRaWANEnv _env;
 
+	// active osjob counter
 	int _jobCount = 0;
 
 	/*
@@ -157,8 +162,8 @@ struct UpstreamMessage {
 		encode(payload);
 	}
 
-	const pb_field_t *_fields;
 	boolean _ackRequested = true;
+	const pb_field_t *_fields;
 	uint8_t _buf[SIZ];
 	uint8_t _len = 0;
 
