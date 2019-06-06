@@ -1,7 +1,8 @@
 # leuville-arduino-lmic-easy
 Various programming utilities for Arduino devices designed to send and receive LoRaWAN messages with LMIC library.
 
-This library is made on top of:
+## Required libraries
+
 
  - LMIC
 	 - arduino port: [https://github.com/matthijskooijman/arduino-lmic](https://github.com/matthijskooijman/arduino-lmic)
@@ -19,5 +20,5 @@ This library is made on top of:
 This example builds 
  
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbMTM3NTA3NDg5OCwtNTM1MzYxOTA0XX0=
+eyJoaXN0b3J5IjpbLTc3NTQ5NjMxMSwtNTM1MzYxOTA0XX0=
 -->
