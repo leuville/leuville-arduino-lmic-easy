@@ -7,7 +7,7 @@ This library is made on top of:
 	 - arduino port: [https://github.com/matthijskooijman/arduino-lmic](https://github.com/matthijskooijman/arduino-lmic)
 	 - MCCI release: [https://github.com/mcci-catena/arduino-lmic](https://github.com/mcci-catena/arduino-lmic)
  - ArduinoSTL: [https://github.com/mike-matera/ArduinoSTL](https://github.com/mike-matera/ArduinoSTL)
- - Nanopb: [https://github.com/nanopb/nanopb](https://github.com/nanopb/nanopb)
+ - Nanopb: C implementation of Google's [Protocol Buffers](http://code.google.com/apis/protocolbuffers/) data format targeted for 32 bit microcontrollers [https://github.com/nanopb/nanopb](https://github.com/nanopb/nanopb)
 
 ## Contents
 
@@ -19,5 +19,5 @@ This library is made on top of:
 This example builds 
  
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbLTUzNTM2MTkwNF19
+eyJoaXN0b3J5IjpbMTM3NTA3NDg5OCwtNTM1MzYxOTA0XX0=
 -->
