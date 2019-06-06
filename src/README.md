@@ -14,15 +14,15 @@ The classes in this library are normally intended to be used inside a class that
 
 ## Contents
 
-### LMICWra
+### LMICWrapper
 
- - LMICWrapper.h:
-	 - LMICWrapper: object-oriented ISR wrapper
-	 - ProtobufEndnode<>
+
+### ProtobufEndnode<>
+
  
 ## Example 1: TestLeuvilleLMIC.ino
 This example builds 
  
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbLTEzODU5NzIxNzIsLTUzNTM2MTkwNF19
+eyJoaXN0b3J5IjpbLTE3Mzg3NDczOTYsLTUzNTM2MTkwNF19
 -->
