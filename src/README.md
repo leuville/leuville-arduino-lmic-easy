@@ -1,6 +1,8 @@
 # leuville-arduino-lmic-easy
 Various programming utilities for Arduino devices designed to send and receive LoRaWAN messages with LMIC library.
 
+The classes in this library are normally intended to be used inside a class that overrides one or more of the virtual methods.
+
 ## Required libraries
 
 
@@ -12,6 +14,8 @@ Various programming utilities for Arduino devices designed to send and receive L
 
 ## Contents
 
+### LMICWra
+
  - LMICWrapper.h:
 	 - LMICWrapper: object-oriented ISR wrapper
 	 - ProtobufEndnode<>
@@ -20,5 +24,5 @@ Various programming utilities for Arduino devices designed to send and receive L
 This example builds 
  
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbLTc3NTQ5NjMxMSwtNTM1MzYxOTA0XX0=
+eyJoaXN0b3J5IjpbLTEzODU5NzIxNzIsLTUzNTM2MTkwNF19
 -->
