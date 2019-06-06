@@ -4,8 +4,9 @@ Various programming utilities for Arduino devices designed to send and receive L
 This library is made on top of:
 
  - LMIC
+	 - 
 	 - MCCI release[https://github.com/mcci-catena/arduino-lmic](https://github.com/mcci-catena/arduino-lmic)
- - ArduinoSTL: 
+ - ArduinoSTL: [https://github.com/mike-matera/ArduinoSTL](https://github.com/mike-matera/ArduinoSTL)
  - Nanopb
 
 ## Contents
@@ -17,5 +18,5 @@ This library is made on top of:
 ## Example 1: TestLeuvilleLMIC.ino
  
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbMzc4NTU2MDBdfQ==
+eyJoaXN0b3J5IjpbLTk0NDI5MzI0Ml19
 -->
