@@ -1,5 +1,10 @@
 # leuville-arduino-lmic-easy
-Various programming utilities for Arduino devices.
+Various programming utilities for Arduino devices designed to send and receive LoRaWAN messages with LMIC library.
+
+This library is made on top of:
+
+ - LMIC
+ - ArduinoSTL
 
 ## Contents
 
@@ -7,8 +12,8 @@ Various programming utilities for Arduino devices.
 	 - LMICWrapper: object-oriented ISR wrapper
 	 - ProtobufEndnode<>
  
-## Example 1: 
- This code builds a new class with a button connected on pin A3. Each time the button is pressed, the virtual function ISR_callback is called. The pin number is a template parameter.
+## Example 1: TestLeuvilleLMIC.ino
+ 
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbLTE2NjgwMzk3NDhdfQ==
+eyJoaXN0b3J5IjpbNTkwNjUwMTYyXX0=
 -->
