@@ -16,7 +16,8 @@ This library is made on top of:
 	 - ProtobufEndnode<>
  
 ## Example 1: TestLeuvilleLMIC.ino
+This example builds 
  
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbOTM4NTA4NjM1XX0=
+eyJoaXN0b3J5IjpbLTUzNTM2MTkwNF19
 -->
