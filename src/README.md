@@ -21,12 +21,12 @@ The classes in this library are normally intended to be used inside a class that
 
  
 ## Example 1: TestLMICWrapper.ino
-This example builds 
+This example builds a LoRaWAN device with
 
  ## Example 2: TestProtobufEndnode.ino
-This example builds 
+This example shows how to serialize/deserialize LoRaWAN messages with ProtocolBuffer.
  
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbLTY0NjM1ODE1MCwtMTczODc0NzM5NiwtNT
+eyJoaXN0b3J5IjpbLTI3ODI0NDI2OSwtMTczODc0NzM5NiwtNT
 M1MzYxOTA0XX0=
 -->
