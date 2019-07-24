@@ -19,7 +19,7 @@ The classes in this library are normally intended to be used inside a class that
 ### LMICWrapper
 LMICWrapper is a base class for LoRaWAN endnodes built on top of LMIC library. It has been tested with two LMIC implementations (see Required libraries section).
 
-LMICWrapper stores LoRaWAN messages into a deque object (STL)
+LMICWrapper stores LoRaWAN messages into a deque object (STL). Each time runloopOnce() is called, a LMIC callback job is registered to send first
 
 ### ProtobufEndnode<>
 ProtobufEndnode is a subclass of LMICWrapper which uses ProtocolBuffer to serialize/deserialize LoRaWAN messages.
@@ -37,7 +37,7 @@ The endnode device is the same as the one built in TestLMICWrapper.ino sample.
 
  
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbLTM4NjMyNTQ2MCwtMTcxMDczNzA2Miw2Nj
+eyJoaXN0b3J5IjpbMTc5NTQ2MDcwNSwtMTcxMDczNzA2Miw2Nj
 YyNDA5ODMsMTc2MjAxNzcyMSwtMTczODc0NzM5NiwtNTM1MzYx
 OTA0XX0=
 -->
