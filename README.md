@@ -31,7 +31,7 @@ This example builds a LoRaWAN device as a subclass of LMICWrapper, with:
 
  1. a callback set on button connected to A0 pin. This callback sends a "CLICK" message each time the button is pressed.
  2. a timer to send a "TIMEOUT" message each 5 mn
- 3. a stanby mode feature
+ 3. a standby mode feature
 
  ## Example 2: TestProtobufEndnode.ino
 This example shows how to serialize/deserialize LoRaWAN messages with ProtocolBuffer.
@@ -39,8 +39,8 @@ The endnode device is the same as the one built in TestLMICWrapper.ino sample.
 
  
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbODQzOTI1OTcyLC0zNzg1NjQ2MCwtMjQ2NT
-cxOTc2LC0yMDYzMTA5NjY3LC0xNzEwNzM3MDYyLDY2NjI0MDk4
-MywxNzYyMDE3NzIxLC0xNzM4NzQ3Mzk2LC01MzUzNjE5MDRdfQ
-==
+eyJoaXN0b3J5IjpbMTgwOTg3Njc2MCw4NDM5MjU5NzIsLTM3OD
+U2NDYwLC0yNDY1NzE5NzYsLTIwNjMxMDk2NjcsLTE3MTA3Mzcw
+NjIsNjY2MjQwOTgzLDE3NjIwMTc3MjEsLTE3Mzg3NDczOTYsLT
+UzNTM2MTkwNF19
 -->
