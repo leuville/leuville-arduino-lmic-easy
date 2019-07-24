@@ -24,8 +24,10 @@ LMICWrapper stores LoRaWAN messages into a deque object (STL) which acts as a FI
 ### ProtobufEndnode<>
 ProtobufEndnode is a subclass of LMICWrapper which uses ProtocolBuffer to serialize/deserialize LoRaWAN messages.
 
-ProtobufEndnode is a template class parametrized by ProtocolBuffer message types:
-- 
+ProtobufEndnode is a template class parametrized by ProtocolBuffer message types generated :
+
+ - Nanopb 
+
  
 ## Example 1: TestLMICWrapper.ino
 This example builds a LoRaWAN device as a subclass of LMICWrapper, with:
@@ -40,7 +42,7 @@ The endnode device is the same as the one built in TestLMICWrapper.ino sample.
 
  
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbLTI0NjU3MTk3NiwtMjA2MzEwOTY2NywtMT
-cxMDczNzA2Miw2NjYyNDA5ODMsMTc2MjAxNzcyMSwtMTczODc0
-NzM5NiwtNTM1MzYxOTA0XX0=
+eyJoaXN0b3J5IjpbLTI0MzU5MDAzLC0yNDY1NzE5NzYsLTIwNj
+MxMDk2NjcsLTE3MTA3MzcwNjIsNjY2MjQwOTgzLDE3NjIwMTc3
+MjEsLTE3Mzg3NDczOTYsLTUzNTM2MTkwNF19
 -->
