@@ -1,7 +1,7 @@
 # leuville-arduino-lmic-easy
 Various programming utilities for Arduino devices designed to send and receive LoRaWAN messages with LMIC library.
 LMICWrapper is a base class for LoRaWAN endnodes built on top of LMIC library.
-ProtobufEndnode is a subclass of LMICWrapper 
+ProtobufEndnode is a subclass of LMICWrapper which uses ProtocolBuffer to serialize/deserialize LoRaWAN messages.
 
 The classes in this library are normally intended to be used inside a class that overrides one or more of the virtual methods.
 
@@ -35,6 +35,6 @@ The endnode device is the same as the one built in TestLMICWrapper.ino sample.
 
  
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbLTUwNTU2NjAwMyw2NjYyNDA5ODMsMTc2Mj
+eyJoaXN0b3J5IjpbMTQwMTI2NDk4Myw2NjYyNDA5ODMsMTc2Mj
 AxNzcyMSwtMTczODc0NzM5NiwtNTM1MzYxOTA0XX0=
 -->
