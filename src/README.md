@@ -23,14 +23,16 @@ The classes in this library are normally intended to be used inside a class that
 ## Example 1: TestLMICWrapper.ino
 This example builds a LoRaWAN device with:
 
- 1. A callback set on button connected to A0 pin. This callback sends a "Button" message each time the button is pressed.
+ 1. a callback set on button connected to A0 pin. This callback sends a "Button" message each time the button is pressed.
  2. a timer to send a "Ping" message each 5 mn
- 3. a stanby mode 
+ 3. a stanby mode feature
 
  ## Example 2: TestProtobufEndnode.ino
 This example shows how to serialize/deserialize LoRaWAN messages with ProtocolBuffer.
+The endnode device is the same as the one built in TestLMICWrapper.ino sample.
+
  
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbMTMyNTY0NjExNCwtMTczODc0NzM5NiwtNT
+eyJoaXN0b3J5IjpbMTc2MjAxNzcyMSwtMTczODc0NzM5NiwtNT
 M1MzYxOTA0XX0=
 -->
