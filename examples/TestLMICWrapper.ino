@@ -2,18 +2,24 @@
  * TestLeuvilleLMIC
  */
 
+#include <SPI.h>
 #include <Arduino.h>
 
-#include <LMICWrapper.h>
 #include <RTCZero.h>
+
+// leuville-arduino-easy-lmic
+#include <LMICWrapper.h>
+// leuville-arduino-utilities
 #include <misc-util.h>
 #include <ISRWrapper.h>
 #include <energy.h>
 #include <StatusLed.h>
 
+// nanopb (Protocol Buffer)
 #include "message.pb.h"
 
-/* ---------------------------------------------------------------------------------------
+/* 
+ * ---------------------------------------------------------------------------------------
  * PIN mappings
  *
  * (!) DO NOT FORGET TO CONNECT DIO1 with D6 on Feather M0 LoRa board
@@ -22,12 +28,12 @@
 #define ARDUINO_SAMD_FEATHER_M0	1
 
 const lmic_pinmap feather_m0_lora_pins = {
-	.nss			= 8, // CS
+	.nss			= 8,						// CS
 	.rxtx			= LMIC_UNUSED_PIN,
 	.rst			= LMIC_UNUSED_PIN,
 	.dio			= {3, 6, LMIC_UNUSED_PIN},	// {DIO0 = IRQ, DIO1, DIO2}
 	.rxtx_rx_active = 0,
-	.rssi_cal		= 8, // LBT cal for the Adafruit Feather M0 LoRa, in dB
+	.rssi_cal		= 8,						// LBT cal for the Adafruit Feather M0 LoRa, in dB
 	.spi_freq		= 8000000
 };
 
@@ -35,7 +41,6 @@ const lmic_pinmap feather_m0_lora_pins = {
  * Application classes
  * ---------------------------------------------------------------------------------------
  */
-using Base = ProtobufEndnode<leuville_Uplink, leuville_Uplink_size, leuville_Downlink, leuville_Downlink_size>;
 
 /*
  * LoraWan + ProtocolBuffer endnode with:
@@ -43,8 +48,13 @@ using Base = ProtobufEndnode<leuville_Uplink, leuville_Uplink_size, leuville_Dow
  * - a callback set on button connected to A0 pin, which triggers a BUTTON message
  * - standby mode capacity
  */
+using Base = LMICWrapper;
+
 class EndNode : public Base, ISRTimer, ISRWrapper<A0>, StandbyMode {
 
+	/*
+	 * Jobs for event callbacks
+	 */
 	osjob_t _buttonJob;
 	osjob_t _timeoutJob;
 
@@ -59,7 +69,7 @@ public:
 	}
 
 	/*
-	 * delegates begin() to each sub-component and send a PING message
+	 * delegates begin() to each sub-component and send an "INIT" message
 	 */
 	void begin() {
 		ISRTimer::_rtc.begin(true);
@@ -68,11 +78,9 @@ public:
 		ISRWrapper::enable();
 		StandbyMode::begin();
 
-		leuville_Uplink payload = {
-				.type = leuville_Type_PING,
-				.battery = getRemainingPower()
-		};
-		send(payload, true);
+		uint8_t msg[] = "INIT";
+		UpMessage payload(msg, sizeof(msg)-1, true);
+		send(payload);
 	}
 
 	/*
@@ -93,38 +101,29 @@ public:
 		setCallback(_timeoutJob);
 	}
 
-	virtual const pb_field_t* getUplinkMessagePBFields() override {
-		return leuville_Uplink_fields;
-	}
-	virtual const pb_field_t* getDownlinkMessagePBFields() override {
-		return leuville_Downlink_fields;
-	}
-
-	virtual void joined() override {
-		ISRTimer::enable();
+	virtual void joined(boolean ok) override {
+		if (ok) {
+			ISRTimer::enable();
+		} else {
+			ISRTimer::disable();
+		}
 	}
 
-	virtual void txComplete(const leuville_Uplink& payload, boolean ackRequested, boolean received) override {
-
-	};
-
-	virtual void downlinkReceived(const leuville_Downlink& payload) override {
-		ISRTimer::setTimeout(payload.pingDelay);
+	virtual void downlinkReceived(const DownMessage & message)  {
+		if (message._len > 0) {
+			ISRTimer::setTimeout((uint32_t)strtoul((char*)message._buf, nullptr, 10));
+		}
 	}
 
 	virtual void performJob(osjob_t* job) override {
 		if (job == &_buttonJob) {
-			leuville_Uplink payload = {
-					.type = leuville_Type_BUTTON,
-					.battery = getRemainingPower()
-			};
-			send(payload, true);
+			uint8_t msg[] = "CLICK";
+			UpMessage payload(msg, sizeof(msg) - 1, true);
+			send(payload);
 		} else if (job == &_timeoutJob) {
-			leuville_Uplink payload = {
-					.type = leuville_Type_PING,
-					.battery = getRemainingPower()
-			};
-			send(payload, false);
+			uint8_t msg[] = "TIMEOUT";
+			UpMessage payload(msg, sizeof(msg) - 1, false);
+			send(payload);
 		} else {
 			Base::performJob(job);
 		}
