@@ -19,6 +19,8 @@
 #include <pb_encode.h>
 #include <pb_decode.h>
 
+#include <misc-util.h>
+
 using namespace std;
 
 /*
@@ -55,15 +57,16 @@ struct LoRaWANEnv {
  * Message buffer = uint8_t array + size
  * Acts as a base class for UpstreamMessage and DownstreamMessage
  */
-template <uint8_t MAXLEN = MAX_FRAME_LEN>
+constexpr uint8_t MAX_MESSAGE_LEN = MAX_FRAME_LEN;
+
 struct Message {
-	uint8_t _buf[MAXLEN];
+	uint8_t _buf[MAX_MESSAGE_LEN] = { 0 };
 	uint8_t _len = 0;
 
+	Message() {}
 	Message(uint8_t* buf, uint8_t len)
 		: _len(len)
 	{
-		memset(_buf, 0, sizeof(_buf));
 		memcpy(_buf, buf, _len);
 	}
 };
@@ -71,22 +74,19 @@ struct Message {
 /*
  * UpStream message = message buffer + ack request
  */
-template <uint8_t MAXLEN = MAX_FRAME_LEN>
-struct UpstreamMessage : Message<MAXLEN> {
-	boolean _ackRequested = false;
-
-	UpstreamMessage(uint8_t* buf = nullptr, uint8_t len = 0, boolean ackRequested = false)
-		: Message<MAXLEN>(buf, len), _ackRequested(ackRequested)
-	{
-	}
+struct UpstreamMessage : Message {
+	bool _ackRequested = false;
+	UpstreamMessage() {}
+	UpstreamMessage(uint8_t* buf, uint8_t len, bool ackRequested)
+		: Message(buf, len), _ackRequested(ackRequested)
+	{}
 };
 
 /*
  * Downstream message = message buffer
  */
-template <uint8_t MAXLEN = MAX_FRAME_LEN>
-struct DownstreamMessage : Message<MAXLEN> {
-	using Message<MAXLEN>::Message;
+struct DownstreamMessage : Message {
+	using Message::Message;
 };
 
 /*
@@ -95,12 +95,8 @@ struct DownstreamMessage : Message<MAXLEN> {
 void onEvent(ev_t ev);
 void do_it(osjob_t* j);
 
-using LMICMessage = Message<MAX_FRAME_LEN>;
-using UpMessage = UpstreamMessage<MAX_FRAME_LEN>;
-using DownMessage = DownstreamMessage<MAX_FRAME_LEN>;
-
 /*
- * LMIC abstract base class
+ * LMIC base class
  * - contains singleton reference needed by LMIC callbacks (delegation)
  * - manages LoRaWAN OTAA keys
  */
@@ -130,11 +126,15 @@ public:
 
 	/*
 	 * Add a job to the callback list managed by LMIC
+	 * if interval == 0 then callback is set with os_setCallback()
+	 * else callback is set with os_setTimedCallback()
+	 *
+	 * ms = number of milliseconds
 	 */
-	virtual void setCallback(osjob_t& job, long interval = 0) final {
+	virtual void setCallback(osjob_t& job, long ms = 0) final {
 		_jobCount += 1;
-		if (interval) {
-			os_setTimedCallback(&job, os_getTime() + interval, do_it);
+		if (ms) {
+			os_setTimedCallback(&job, os_getTime() + ms2osticks(ms), do_it);
 		} else {
 			os_setCallback(&job, do_it);
 		}
@@ -157,35 +157,37 @@ public:
 	/*
 	 * Push a message to the front of the FIFO waiting queue
 	 */
-	virtual void send(const UpMessage & message) {
+	virtual void send(const UpstreamMessage & message) {
+		noInterrupts();
 		_messages.push_front(message);
+		interrupts();
 	}
 
 	/*
 	 * Returns true is there at least one message waiting to be sent
 	 */
-	virtual boolean hasMessageToSend() {
+	virtual bool hasMessageToSend() {
 		return (_messages.size() > 0);
 	}
 
 	/*
 	 * Returns true if LMIC radio is pending
 	 */
-	boolean isRadioBusy() {
+	bool isRadioBusy() {
 		return (LMIC.opmode & OP_TXRXPEND);
 	}
 
 	/*
 	 * Returns true if TX buffer contains data for sending
 	 */
-	boolean isTxDataPending() {
+	bool isTxDataPending() {
 		return (LMIC.opmode & OP_TXDATA);
 	}
 
 	/*
 	 * Return true if the device can be put in standby mode.
 	 */
-	virtual boolean isReadyForStandby() {
+	virtual bool isReadyForStandby() {
 		return _joined && (_jobCount == 0) && !hasMessageToSend() && !isRadioBusy() && !isTxDataPending();
 	}
 
@@ -200,13 +202,13 @@ protected:
 	int _jobCount = 0;
 
 	osjob_t _sendJob;
-	boolean _sendJobRequested = false;
+	bool _sendJobRequested = false;
 
 	// LoRaWAN JOIN done ?
-	boolean _joined = false;
+	bool _joined = false;
 
 	// FIFO messages waiting to be sent
-	deque<UpMessage> _messages;			
+	deque<UpstreamMessage> _messages;			
 
 	/*
 	 * Reset LMIC, and set LMIC parameters
@@ -236,7 +238,7 @@ protected:
 	 */
 	virtual void send() {
 		if (!isTxDataPending() && !isRadioBusy() && hasMessageToSend()) {
-			UpMessage& msg = _messages.back();
+			UpstreamMessage msg = _messages.back();
 			lmicSend(msg._buf, msg._len, msg._ackRequested);
 		}
 	}
@@ -276,7 +278,7 @@ protected:
 	 * Called if endnode is joined or not
 	 * May be overriden
 	 */
-	virtual void joined(boolean) {}
+	virtual void joined(bool) {}
 
 	/*
 	 * Called by onEvent() calback
@@ -284,9 +286,11 @@ protected:
 	 *  removes sent message from the FIFO to avoid another transmission
 	 */
 	virtual void txComplete() {
-		UpMessage& sent = _messages.back();
+		UpstreamMessage sent = _messages.back();
 		if (isTxCompleted(sent, sent._ackRequested, (LMIC.txrxFlags & TXRX_NACK) == 0)) {
+			noInterrupts();
 			_messages.pop_back(); // message is removed from FIFO
+			interrupts();
 		}
 		// RX1 or RX2 ?
 		if (LMIC.dataLen > 0) {
@@ -294,23 +298,23 @@ protected:
 			for (uint8_t i = 0; i < LMIC.dataLen; i++) {
 				buf[i] = (pb_byte_t)LMIC.frame[LMIC.dataBeg + i];
 			}
-			downlinkReceived(DownMessage(buf, LMIC.dataLen));
+			downlinkReceived(DownstreamMessage(buf, LMIC.dataLen));
 		}
 	}
 
 	/*
 	 * Default send completion policy
 	 */
-	virtual boolean isTxCompleted(const UpMessage & message, boolean ackRequested, boolean ack) {
-		return (ack == ackRequested);
+	virtual bool isTxCompleted(const UpstreamMessage & message, bool ackRequested, bool ack) {
+		return ack;
 	};
 
-	virtual void downlinkReceived(const DownMessage&) {}
+	virtual void downlinkReceived(const DownstreamMessage&) {}
 
 	/*
 	 * Fills in LMIC buffer for sending
 	 */
-	void lmicSend(uint8_t* data, uint8_t len, boolean ackRequested) {
+	void lmicSend(uint8_t* data, uint8_t len, bool ackRequested) {
 		LMIC_setTxData2(1, data, len, ackRequested);
 	}
 };
@@ -324,6 +328,7 @@ LMICWrapper * LMICWrapper::_node = nullptr;
  * LMIC callbacks
  * call delegation to LMICWrapper singleton
  */
+
 void os_getArtEui (u1_t* buf) 	{ memcpy_P(buf, LMICWrapper::_node->_env._appEUI, 8);}
 void os_getDevEui (u1_t* buf) 	{ memcpy_P(buf, LMICWrapper::_node->_env._devEUI, 8);}
 void os_getDevKey (u1_t* buf) 	{ memcpy_P(buf, LMICWrapper::_node->_env._appKEY, 16);}
@@ -335,11 +340,16 @@ void do_it(osjob_t* j) 			{ LMICWrapper::_node->performJob(j); }
  *
  * WARNING: message is encoded with delimiter (see Google API)
  */
+
 template<typename PBType>
-uint8_t encode(const PBType & src, const pb_field_t * fields, LMICMessage & dest) {
-	pb_ostream_t stream = pb_ostream_from_buffer(dest._buf, sizeof(dest._buf));
-	pb_encode_delimited(&stream, fields, &src);
-	dest._len = stream.bytes_written;
+size_t encode(const PBType & src, const pb_field_t * fields, Message & dest) {
+	pb_ostream_t stream = pb_ostream_from_buffer(dest._buf, sizeof dest._buf);
+	if (pb_encode(&stream, fields, &src)) {
+		dest._len = stream.bytes_written;
+	}
+	else {
+		dest._len = 0;
+	}
 	return dest._len;
 }
 
@@ -348,10 +358,11 @@ uint8_t encode(const PBType & src, const pb_field_t * fields, LMICMessage & dest
  *
  * WARNING: message is encoded with delimiter (see Google API)
  */
+
 template <typename PBType>
-boolean decode(const LMICMessage & src, const pb_field_t* fields, PBType & dest) {
+bool decode(const Message& src, const pb_field_t* fields, PBType & dest) {
 	pb_istream_t stream = pb_istream_from_buffer(src._buf, src._len);
-	return pb_decode_delimited(&stream, fields, &dest);
+	return pb_decode(&stream, fields, &dest);
 }
 
 /*
@@ -373,14 +384,17 @@ public:
 	 *
 	 * Back of this deque is sent after call to runLoopOnce()
 	 */
-	virtual void send(const U & payload, boolean ackRequested = true) {
-		_messages.push_front(UpMessage());
-		encode(payload, UFIELDS, _messages.front());
+	virtual void send(const U & payload, bool ackRequested = true) {
+		UpstreamMessage upMessage;
+		upMessage._ackRequested = ackRequested;
+		if (encode(payload, UFIELDS, upMessage)) {
+			LMICWrapper::send(upMessage);
+		}
 	}
 
 protected:
 
-	virtual void downlinkReceived(const DownMessage & message) override {
+	virtual void downlinkReceived(const DownstreamMessage & message) override {
 		D downstreamPayload;
 		if (decode(message, DFIELDS, downstreamPayload)) {
 			downlinkReceived(downstreamPayload);
@@ -397,13 +411,17 @@ protected:
 	/*
 	 * Default send completion policy
 	 */
-	virtual boolean isTxCompleted(const UpMessage& message, boolean ackRequested, boolean ack) {
+	virtual bool isTxCompleted(const UpstreamMessage& message, bool ackRequested, bool ack) override {
 		U payload;
 		decode(message, UFIELDS, payload);
 		return isTxCompleted(payload, ackRequested, ack);
 	};
 
-	virtual boolean isTxCompleted(const U & message, boolean ackRequested, boolean ack) {
-		return (ack == ackRequested);
+	/*
+	 * May be overriden if needed
+	 */
+	virtual bool isTxCompleted(const U & message, bool ackRequested, bool ack) {
+		return ack;
 	}
+
 };

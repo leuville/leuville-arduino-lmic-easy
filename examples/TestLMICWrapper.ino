@@ -2,10 +2,9 @@
  * TestLeuvilleLMIC
  */
 
-#include <SPI.h>
 #include <Arduino.h>
 
-#include <RTCZero.h>
+#define ARDUINO_SAMD_FEATHER_M0	1
 
 // leuville-arduino-easy-lmic
 #include <LMICWrapper.h>
@@ -15,9 +14,6 @@
 #include <energy.h>
 #include <StatusLed.h>
 
-// nanopb (Protocol Buffer)
-#include "message.pb.h"
-
 /* 
  * ---------------------------------------------------------------------------------------
  * PIN mappings
@@ -25,8 +21,6 @@
  * (!) DO NOT FORGET TO CONNECT DIO1 with D6 on Feather M0 LoRa board
  * ---------------------------------------------------------------------------------------
  */
-#define ARDUINO_SAMD_FEATHER_M0	1
-
 const lmic_pinmap feather_m0_lora_pins = {
 	.nss			= 8,						// CS
 	.rxtx			= LMIC_UNUSED_PIN,
@@ -43,7 +37,7 @@ const lmic_pinmap feather_m0_lora_pins = {
  */
 
 /*
- * LoraWan + ProtocolBuffer endnode with:
+ * LoraWan endnode with:
  * - a timer to trigger a PING message each 5 mn
  * - a callback set on button connected to A0 pin, which triggers a BUTTON message
  * - standby mode capacity
@@ -75,12 +69,11 @@ public:
 		ISRTimer::_rtc.begin(true);
 		ISRTimer::_rtc.setDate(1, 1, 0);
 		Base::begin();
-		ISRWrapper::enable();
 		StandbyMode::begin();
+		ISRWrapper<A0>::begin();
 
-		uint8_t msg[] = "INIT";
-		UpMessage payload(msg, sizeof(msg)-1, true);
-		send(payload);
+		ISRWrapper<A0>::enable();
+		setCallback(_timeoutJob);
 	}
 
 	/*
@@ -101,6 +94,9 @@ public:
 		setCallback(_timeoutJob);
 	}
 
+	/*
+	 * Starts timer when joined
+	 */
 	virtual void joined(boolean ok) override {
 		if (ok) {
 			ISRTimer::enable();
@@ -109,7 +105,7 @@ public:
 		}
 	}
 
-	virtual void downlinkReceived(const DownMessage & message)  {
+	virtual void downlinkReceived(const DownstreamMessage & message)  {
 		if (message._len > 0) {
 			ISRTimer::setTimeout((uint32_t)strtoul((char*)message._buf, nullptr, 10));
 		}
@@ -118,17 +114,22 @@ public:
 	virtual void performJob(osjob_t* job) override {
 		if (job == &_buttonJob) {
 			uint8_t msg[] = "CLICK";
-			UpMessage payload(msg, sizeof(msg) - 1, true);
+			UpstreamMessage payload(msg, sizeof(msg), true);
 			send(payload);
 		} else if (job == &_timeoutJob) {
 			uint8_t msg[] = "TIMEOUT";
-			UpMessage payload(msg, sizeof(msg) - 1, false);
+			UpstreamMessage payload(msg, sizeof(msg), false);
 			send(payload);
-		} else {
-			Base::performJob(job);
-		}
+		} 
+		//
+		// DO NOT REMOVE !
+		//
+		Base::performJob(job);
 	}
 
+	/*
+	 * Activates standby mode
+	 */
 	void standby() {
 		StandbyMode::standby();
 	}
@@ -142,11 +143,19 @@ public:
 RTCZero 	rtc;
 BlinkingLed statusLed(LED_BUILTIN, 500);
 
+/*
+ * LoRaWAN settings
+ *
+ * Replace keys by appropriate values
+ */
 LoRaWANEnv env(
 	feather_m0_lora_pins,
-	{ 0x03, 0x00, 0x00, 0xDA, 0xC0, 0x92, 0xB5, 0x7B },
-	{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0xBA, 0xA1 },
-	{ 0x2B, 0x7E, 0x15, 0x16, 0x28, 0xAE, 0xD2, 0xA6, 0xAB, 0xF7, 0x15, 0x88, 0x09, 0xCF, 0x4F, 0x3C }
+	// APPEUI
+	{ 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA },
+	// DEVEUI
+	{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xDE },
+	// APPKEY
+	{ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF }
 );
 
 // LMIC PINS

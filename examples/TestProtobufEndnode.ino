@@ -1,10 +1,10 @@
 /*
- * TestLeuvilleLMIC
+ * TestProtobufEndnode
  */
 
 #include <Arduino.h>
 
-#include <RTCZero.h>
+#define ARDUINO_SAMD_FEATHER_M0	1
 
 // leuville-arduino-easy-lmic
 #include <LMICWrapper.h>
@@ -24,8 +24,6 @@
  * (!) DO NOT FORGET TO CONNECT DIO1 with D6 on Feather M0 LoRa board
  * ---------------------------------------------------------------------------------------
  */
-#define ARDUINO_SAMD_FEATHER_M0	1
-
 const lmic_pinmap feather_m0_lora_pins = {
 	.nss			= 8,						// CS
 	.rxtx			= LMIC_UNUSED_PIN,
@@ -88,14 +86,11 @@ public:
 		ISRTimer::_rtc.begin(true);
 		ISRTimer::_rtc.setDate(1, 1, 0);
 		Base::begin();
-		ISRWrapper::enable();
 		StandbyMode::begin();
+		ISRWrapper<A0>::begin();
 
-		leuville_Uplink payload = {
-				.type = leuville_Type_PING,
-				.battery = getBatteryPower()
-		};
-		send(payload, true);
+		ISRWrapper<A0>::enable();
+		setCallback(_timeoutJob);
 	}
 
 	/*
@@ -150,22 +145,33 @@ public:
 
 	virtual void performJob(osjob_t* job) override {
 		if (job == &_buttonJob) {
-			leuville_Uplink payload = {
-					.type = leuville_Type_BUTTON,
-					.battery = getBatteryPower()
-			};
-			send(payload, true);
+			ISRTimer::disable();
+			ISRTimer::enable();
+			send(buildPayload(leuville_Type_BUTTON), false); // true -> ACK -> slower
 		} else if (job == &_timeoutJob) {
-			leuville_Uplink payload = {
-					.type = leuville_Type_PING,
-					.battery = getBatteryPower()
-			};
-			send(payload, false);
-		} else {
-			Base::performJob(job);
+			if (!hasMessageToSend()) {
+				send(buildPayload(leuville_Type_PING), false);
+			}
 		}
+		// ***************
+		// DO NOT REMOVE !
+		// ***************
+		Base::performJob(job);
 	}
 
+	/*
+	 * Builds an uplink message
+	 */
+	leuville_Uplink buildPayload(leuville_Type uplinkType) {
+		leuville_Uplink payload = leuville_Uplink_init_zero;
+		payload.battery = getBatteryPower();
+		payload.type = uplinkType;
+		return payload;
+	}
+
+	/*
+	 * Activates standby mode
+	 */
 	void standby() {
 		StandbyMode::standby();
 	}
@@ -181,9 +187,12 @@ BlinkingLed statusLed(LED_BUILTIN, 500);
 
 LoRaWANEnv env(
 	feather_m0_lora_pins,
-	{ 0x03, 0x00, 0x00, 0xDA, 0xC0, 0x92, 0xB5, 0x7B },
-	{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0xBA, 0xA1 },
-	{ 0x2B, 0x7E, 0x15, 0x16, 0x28, 0xAE, 0xD2, 0xA6, 0xAB, 0xF7, 0x15, 0x88, 0x09, 0xCF, 0x4F, 0x3C }
+	// APPEUI
+	{ 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA },
+	// DEVEUI
+	{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xDE },
+	// APPKEY
+	{ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF }
 );
 
 // LMIC PINS
