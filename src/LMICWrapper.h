@@ -337,8 +337,6 @@ void do_it(osjob_t* j) 			{ LMICWrapper::_node->performJob(j); }
 
 /*
  * Encodes src object using nanopb into dest
- *
- * WARNING: message is encoded with delimiter (see Google API)
  */
 
 template<typename PBType>
@@ -355,8 +353,6 @@ size_t encode(const PBType & src, const pb_field_t * fields, Message & dest) {
 
 /*
  * Builds dest object using nanopb from src raw message
- *
- * WARNING: message is encoded with delimiter (see Google API)
  */
 
 template <typename PBType>
@@ -413,8 +409,10 @@ protected:
 	 */
 	virtual bool isTxCompleted(const UpstreamMessage& message, bool ackRequested, bool ack) override {
 		U payload;
-		decode(message, UFIELDS, payload);
-		return isTxCompleted(payload, ackRequested, ack);
+		if (decode(message, UFIELDS, payload))
+			return isTxCompleted(payload, ackRequested, ack);
+		else
+			return false;
 	};
 
 	/*
