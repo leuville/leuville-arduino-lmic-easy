@@ -58,11 +58,15 @@ The message sent by the device is defined with a .proto file like this one:
     }
 In this example, the LoRaWAN uplink message is encoded with these data:
 
+ 1. A type which may be PING or BUTTON. PING is sent on timed regular basis, BUTTON is sent when an interrupt occurs.
+ 2. The battery level in range 0..100
+
+T
 
  
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbLTE4MTYxOTY3MjksMTIzMDgzNzU4MiwxOD
-A5ODc2NzYwLDg0MzkyNTk3MiwtMzc4NTY0NjAsLTI0NjU3MTk3
-NiwtMjA2MzEwOTY2NywtMTcxMDczNzA2Miw2NjYyNDA5ODMsMT
-c2MjAxNzcyMSwtMTczODc0NzM5NiwtNTM1MzYxOTA0XX0=
+eyJoaXN0b3J5IjpbMjA5MTEzNzQ2NywxMjMwODM3NTgyLDE4MD
+k4NzY3NjAsODQzOTI1OTcyLC0zNzg1NjQ2MCwtMjQ2NTcxOTc2
+LC0yMDYzMTA5NjY3LC0xNzEwNzM3MDYyLDY2NjI0MDk4MywxNz
+YyMDE3NzIxLC0xNzM4NzQ3Mzk2LC01MzUzNjE5MDRdfQ==
 -->
