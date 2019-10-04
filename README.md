@@ -63,10 +63,18 @@ In this example, the LoRaWAN uplink message is encoded with these data:
 
 A LoRaWAN downlink message may be sent by the server to the device. In this example, it contains the delay to use by the device to separate two PING messages.
 
+The .proto file may have options. In our case it is:
+
+    leuville.Uplink.battery		int_size:8
+    leuville.Downlink.pingDelay	int_size:16
+
+The purpose is 
+
  
+
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbMTE2ODk5MDYxNSwxMjMwODM3NTgyLDE4MD
-k4NzY3NjAsODQzOTI1OTcyLC0zNzg1NjQ2MCwtMjQ2NTcxOTc2
-LC0yMDYzMTA5NjY3LC0xNzEwNzM3MDYyLDY2NjI0MDk4MywxNz
-YyMDE3NzIxLC0xNzM4NzQ3Mzk2LC01MzUzNjE5MDRdfQ==
+eyJoaXN0b3J5IjpbLTE1MDY3MzA4OTgsMTIzMDgzNzU4MiwxOD
+A5ODc2NzYwLDg0MzkyNTk3MiwtMzc4NTY0NjAsLTI0NjU3MTk3
+NiwtMjA2MzEwOTY2NywtMTcxMDczNzA2Miw2NjYyNDA5ODMsMT
+c2MjAxNzcyMSwtMTczODc0NzM5NiwtNTM1MzYxOTA0XX0=
 -->
