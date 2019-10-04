@@ -61,11 +61,11 @@ In this example, the LoRaWAN uplink message is encoded with these data:
  1. A type which may be PING or BUTTON. PING is sent on timed regular basis, BUTTON is sent when an interrupt occurs.
  2. The battery level in range 0..100
 
-T
+A LoRaWAN downlink message may be sent by the server to the device. In this example, it contains the delay to use by the device to separate two PING messages.
 
  
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbMjA5MTEzNzQ2NywxMjMwODM3NTgyLDE4MD
+eyJoaXN0b3J5IjpbMTE2ODk5MDYxNSwxMjMwODM3NTgyLDE4MD
 k4NzY3NjAsODQzOTI1OTcyLC0zNzg1NjQ2MCwtMjQ2NTcxOTc2
 LC0yMDYzMTA5NjY3LC0xNzEwNzM3MDYyLDY2NjI0MDk4MywxNz
 YyMDE3NzIxLC0xNzM4NzQ3Mzk2LC01MzUzNjE5MDRdfQ==
