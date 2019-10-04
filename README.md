@@ -37,11 +37,11 @@ This example builds a LoRaWAN device as a subclass of LMICWrapper, with:
 This example shows how to serialize/deserialize LoRaWAN messages with ProtocolBuffer.
 The endnode device is the same as the one built in TestLMICWrapper.ino sample.
 
-The message sent by the device is defined 
+The message sent by the device is defined with m
  
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbLTY4NjcxNzM0OSwxMjMwODM3NTgyLDE4MD
-k4NzY3NjAsODQzOTI1OTcyLC0zNzg1NjQ2MCwtMjQ2NTcxOTc2
-LC0yMDYzMTA5NjY3LC0xNzEwNzM3MDYyLDY2NjI0MDk4MywxNz
-YyMDE3NzIxLC0xNzM4NzQ3Mzk2LC01MzUzNjE5MDRdfQ==
+eyJoaXN0b3J5IjpbLTExNDA5NzIxMTQsMTIzMDgzNzU4MiwxOD
+A5ODc2NzYwLDg0MzkyNTk3MiwtMzc4NTY0NjAsLTI0NjU3MTk3
+NiwtMjA2MzEwOTY2NywtMTcxMDczNzA2Miw2NjYyNDA5ODMsMT
+c2MjAxNzcyMSwtMTczODc0NzM5NiwtNTM1MzYxOTA0XX0=
 -->
