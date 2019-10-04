@@ -37,10 +37,31 @@ This example builds a LoRaWAN device as a subclass of LMICWrapper, with:
 This example shows how to serialize/deserialize LoRaWAN messages with ProtocolBuffer.
 The endnode device is the same as the one built in TestLMICWrapper.ino sample.
 
-The message sent by the device is defined with m
+The message sent by the device is defined with a .proto file like this one:
+
+    syntax = "proto3";
+    
+    package leuville;
+    
+    enum Type {
+    	PING 	= 0;
+    	BUTTON 	= 1;
+    }
+    
+    message Uplink {		
+    	Type	type			= 1;
+    	uint32	battery 		= 2;
+    }
+    
+    message Downlink {
+    	uint32	pingDelay		= 1;	// seconds
+    }
+In this example, the LoRaWAN uplink message is encoded with these data:
+
+
  
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbLTExNDA5NzIxMTQsMTIzMDgzNzU4MiwxOD
+eyJoaXN0b3J5IjpbLTE4MTYxOTY3MjksMTIzMDgzNzU4MiwxOD
 A5ODc2NzYwLDg0MzkyNTk3MiwtMzc4NTY0NjAsLTI0NjU3MTk3
 NiwtMjA2MzEwOTY2NywtMTcxMDczNzA2Miw2NjYyNDA5ODMsMT
 c2MjAxNzcyMSwtMTczODc0NzM5NiwtNTM1MzYxOTA0XX0=
