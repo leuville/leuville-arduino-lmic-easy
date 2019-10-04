@@ -3,6 +3,9 @@
  *
  * Function: classes for Object-Oriented approach of LMIC
  *
+ * Copyright and license: See accompanying LICENSE file.
+ *
+ * Author: Laurent Nel
  */
 
 #pragma once
@@ -11,10 +14,11 @@
 #include <deque>
 
 #include <lmic.h>
-#include <lmic/oslmic.h>
 #include <hal/hal.h>
+#include <lmic/oslmic.h>
 
 #include <SPI.h>
+#include <arduino_lmic_hal_boards.h>
 
 #include <pb_encode.h>
 #include <pb_decode.h>
@@ -28,7 +32,8 @@ using namespace std;
  */
 struct LoRaWANEnv {
 
-	LoRaWANEnv(const lmic_pinmap & pinmap, initializer_list<u1_t> appEUI, initializer_list<u1_t> devEUI, initializer_list<u1_t> appKEY)
+	LoRaWANEnv(	initializer_list<u1_t> appEUI, initializer_list<u1_t> devEUI, initializer_list<u1_t> appKEY,
+				const lmic_pinmap& pinmap = *(Arduino_LMIC::GetPinmap_ThisBoard()))
 		: _pinmap(pinmap)
 	{
 		auto initTab = [] (u1_t * tab, initializer_list<u1_t> & l) {
@@ -120,7 +125,7 @@ public:
 	 * Initializes LMIC
 	 */
 	virtual void begin() {
-		os_init();
+		os_init_ex( & _env._pinmap);
 		initLMIC();
 	}
 
@@ -150,6 +155,9 @@ public:
 		if (!_sendJobRequested && hasMessageToSend() && !isRadioBusy() && !isTxDataPending()) {
 			_sendJobRequested = true;
 			setCallback(_sendJob);
+			Serial.println(LMIC.globalDutyAvail);
+			Serial.println(LMIC.globalDutyRate);
+			Serial.println(LMIC.txChnl);
 		}
 		os_runloop_once();
 	}
@@ -328,7 +336,6 @@ LMICWrapper * LMICWrapper::_node = nullptr;
  * LMIC callbacks
  * call delegation to LMICWrapper singleton
  */
-
 void os_getArtEui (u1_t* buf) 	{ memcpy_P(buf, LMICWrapper::_node->_env._appEUI, 8);}
 void os_getDevEui (u1_t* buf) 	{ memcpy_P(buf, LMICWrapper::_node->_env._devEUI, 8);}
 void os_getDevKey (u1_t* buf) 	{ memcpy_P(buf, LMICWrapper::_node->_env._appKEY, 16);}
@@ -338,7 +345,6 @@ void do_it(osjob_t* j) 			{ LMICWrapper::_node->performJob(j); }
 /*
  * Encodes src object using nanopb into dest
  */
-
 template<typename PBType>
 size_t encode(const PBType & src, const pb_field_t * fields, Message & dest) {
 	pb_ostream_t stream = pb_ostream_from_buffer(dest._buf, sizeof dest._buf);
@@ -354,7 +360,6 @@ size_t encode(const PBType & src, const pb_field_t * fields, Message & dest) {
 /*
  * Builds dest object using nanopb from src raw message
  */
-
 template <typename PBType>
 bool decode(const Message& src, const pb_field_t* fields, PBType & dest) {
 	pb_istream_t stream = pb_istream_from_buffer(src._buf, src._len);
