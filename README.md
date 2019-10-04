@@ -68,13 +68,15 @@ The .proto file may have options. In our case it is:
     leuville.Uplink.battery		int_size:8
     leuville.Downlink.pingDelay	int_size:16
 
-The purpose is 
+These definitions have to be compiled with Nanopb protoc compiler. It generates .h and .c files.
+
+Then the endnode is  
 
  
 
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbLTE1MDY3MzA4OTgsMTIzMDgzNzU4MiwxOD
-A5ODc2NzYwLDg0MzkyNTk3MiwtMzc4NTY0NjAsLTI0NjU3MTk3
-NiwtMjA2MzEwOTY2NywtMTcxMDczNzA2Miw2NjYyNDA5ODMsMT
-c2MjAxNzcyMSwtMTczODc0NzM5NiwtNTM1MzYxOTA0XX0=
+eyJoaXN0b3J5IjpbLTEzMDMzNTcyNCwxMjMwODM3NTgyLDE4MD
+k4NzY3NjAsODQzOTI1OTcyLC0zNzg1NjQ2MCwtMjQ2NTcxOTc2
+LC0yMDYzMTA5NjY3LC0xNzEwNzM3MDYyLDY2NjI0MDk4MywxNz
+YyMDE3NzIxLC0xNzM4NzQ3Mzk2LC01MzUzNjE5MDRdfQ==
 -->
