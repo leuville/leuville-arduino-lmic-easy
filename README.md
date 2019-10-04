@@ -8,7 +8,7 @@ The classes in this library are normally intended to be used inside a class that
 ## Required libraries
 
 
- - LMIC
+ - LMIC (any of these implementations)
 	 - arduino port: [https://github.com/matthijskooijman/arduino-lmic](https://github.com/matthijskooijman/arduino-lmic)
 	 - MCCI release: [https://github.com/mcci-catena/arduino-lmic](https://github.com/mcci-catena/arduino-lmic)
  - ArduinoSTL: [https://github.com/mike-matera/ArduinoSTL](https://github.com/mike-matera/ArduinoSTL)
@@ -39,8 +39,8 @@ The endnode device is the same as the one built in TestLMICWrapper.ino sample.
 
  
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbMTgwOTg3Njc2MCw4NDM5MjU5NzIsLTM3OD
-U2NDYwLC0yNDY1NzE5NzYsLTIwNjMxMDk2NjcsLTE3MTA3Mzcw
-NjIsNjY2MjQwOTgzLDE3NjIwMTc3MjEsLTE3Mzg3NDczOTYsLT
-UzNTM2MTkwNF19
+eyJoaXN0b3J5IjpbMTIzMDgzNzU4MiwxODA5ODc2NzYwLDg0Mz
+kyNTk3MiwtMzc4NTY0NjAsLTI0NjU3MTk3NiwtMjA2MzEwOTY2
+NywtMTcxMDczNzA2Miw2NjYyNDA5ODMsMTc2MjAxNzcyMSwtMT
+czODc0NzM5NiwtNTM1MzYxOTA0XX0=
 -->
