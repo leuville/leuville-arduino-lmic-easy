@@ -70,12 +70,27 @@ The .proto file may have options. In our case it is:
 
 These definitions have to be compiled with Nanopb protoc compiler. It generates .h and .c files.
 
-Then the endnode is  
+Then the endnode is defined as a template class based on protobuf generated types:
+
+    using Base = ProtobufEndnode<
+    	leuville_Uplink, leuville_Uplink_size, leuville_Uplink_fields,
+    	leuville_Downlink, leuville_Downlink_size, leuville_Downlink_fields
+    >;
+    
+    /*
+     * LoraWan + ProtocolBuffer endnode with:
+     * - a timer to trigger a PING message each 5 mn
+     * - a callback set on button connected to A0 pin, which triggers a BUTTON message
+     * - standby mode capacity
+     */
+    class EndNode : public Base, ISRTimer, ISRWrapper<A0>, StandbyMode { // ... };
+    
 
  
 
+
 <!--stackedit_data:
-eyJoaXN0b3J5IjpbLTEzMDMzNTcyNCwxMjMwODM3NTgyLDE4MD
+eyJoaXN0b3J5IjpbMTM3MjU5MjA0OCwxMjMwODM3NTgyLDE4MD
 k4NzY3NjAsODQzOTI1OTcyLC0zNzg1NjQ2MCwtMjQ2NTcxOTc2
 LC0yMDYzMTA5NjY3LC0xNzEwNzM3MDYyLDY2NjI0MDk4MywxNz
 YyMDE3NzIxLC0xNzM4NzQ3Mzk2LC01MzUzNjE5MDRdfQ==
