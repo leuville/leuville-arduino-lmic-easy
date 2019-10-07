@@ -13,6 +13,7 @@ The classes in this library are normally intended to be used inside a class that
 	 - MCCI release: [https://github.com/mcci-catena/arduino-lmic](https://github.com/mcci-catena/arduino-lmic)
  - ArduinoSTL: [https://github.com/mike-matera/ArduinoSTL](https://github.com/mike-matera/ArduinoSTL)
  - Nanopb: C implementation of Google's [Protocol Buffers](http://code.google.com/apis/protocolbuffers/) data format targeted for 32 bit microcontrollers [https://github.com/nanopb/nanopb](https://github.com/nanopb/nanopb)
+ - leuville-arduino_utilities: various Arduino programming utilities [https://github.com/leuville/leuville-arduino-utilities](https://github.com/leuville/leuville-arduino-utilities)
 
 ## Contents
 
