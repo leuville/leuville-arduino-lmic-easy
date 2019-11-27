@@ -136,11 +136,16 @@ public:
 	 *
 	 * ms = number of milliseconds
 	 */
-	virtual void setCallback(osjob_t& job, long ms = 0) final {
+	virtual void setCallback(osjob_t& job, long ms = 0) {
+		setTimedCallback(job, ms2osticks(ms));
+	}
+
+	virtual void setTimedCallback(osjob_t& job, ostime_t when) {
 		_jobCount += 1;
-		if (ms) {
-			os_setTimedCallback(&job, os_getTime() + ms2osticks(ms), do_it);
-		} else {
+		if (when) {
+			os_setTimedCallback(&job, os_getTime() + when, do_it);
+		}
+		else {
 			os_setCallback(&job, do_it);
 		}
 	}
@@ -154,10 +159,7 @@ public:
 		// if msg pending and LMIC doing nothing -> create a new LMIC job
 		if (!_sendJobRequested && hasMessageToSend() && !isRadioBusy() && !isTxDataPending()) {
 			_sendJobRequested = true;
-			setCallback(_sendJob);
-			Serial.println(LMIC.globalDutyAvail);
-			Serial.println(LMIC.globalDutyRate);
-			Serial.println(LMIC.txChnl);
+			setTimedCallback(_sendJob, LMIC.globalDutyAvail);
 		}
 		os_runloop_once();
 	}
@@ -371,7 +373,7 @@ bool decode(const Message& src, const pb_field_t* fields, PBType & dest) {
  * U = uplink message nanopb type
  * D = downlink message nanopb type
  */
-template <typename U, uint8_t USIZE, const pb_field_t * UFIELDS, typename D, uint8_t DSIZE, const pb_field_t* DFIELDS>
+template <typename U, const pb_field_t * UFIELDS, typename D, const pb_field_t* DFIELDS>
 class ProtobufEndnode: public LMICWrapper {
 public:
 
@@ -380,15 +382,16 @@ public:
 	}
 
 	/*
-	 * Build an UpMessage and push it into front of _messages deque
-	 * then this UpMessage is filled with encoded bytes from payload
-	 *
+	 * Build an UpMessage filled with encoded bytes from payload
+	 * This message is stored in the double-ended queue manage by LMICWrapper.
 	 * Back of this deque is sent after call to runLoopOnce()
+	 *
+	 * fields parameter provides the way to send partial message
 	 */
-	virtual void send(const U & payload, bool ackRequested = true) {
+	virtual void send(const U & payload, bool ackRequested = true, const pb_field_t* fields = UFIELDS) {
 		UpstreamMessage upMessage;
 		upMessage._ackRequested = ackRequested;
-		if (encode(payload, UFIELDS, upMessage)) {
+		if (encode(payload, fields, upMessage)) {
 			LMICWrapper::send(upMessage);
 		}
 	}
