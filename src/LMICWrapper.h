@@ -10,53 +10,78 @@
 
 #pragma once
 
-#include <ArduinoSTL.h>
-#include <deque>
+#include <fixed-deque.h>
 
 #include <lmic.h>
 #include <hal/hal.h>
 #include <lmic/oslmic.h>
-
-#include <SPI.h>
-#include <arduino_lmic_hal_boards.h>
 
 #include <pb_encode.h>
 #include <pb_decode.h>
 
 #include <misc-util.h>
 
-using namespace std;
-
 /*
- * LoRaWAN configuration: pinmaps, OTAA keys
+ * LoRaWAN configuration: OTAA keys
+ * 
+ * This struct may be used like this:
+ * 		enum Config { TTN, OPE1, OPE2, OPE3, ANOTHER1, ANOTHER2 };
+ * 		OTAAId id[] = {
+ *			  // APPEUI			  // DEVEUI			  // APPKEY
+ *			{ "70B3D57EXXXXXXXX", "0000A06EXXXXXXXX", "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" }, 	
+ *			{ "7BB592C0XXXXXXXX", "A1BA1800XXXXXXXX", "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" }, 	
+ *			{ "7BB592C0XXXXXXXX", "A2BAXXXXXXXXXXXX", "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" }, 	
+ *			{ "7BB592C0XXXXXXXX", "A3BA1XXXXXXXXXXX", "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" }, 	 
+ *			{ "70B3D59BXXXXXXXX", "70B3D5XXXXXXXXXX", "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" },		
+ * 			{ "7BB592C0XXXXXXXX", "000000XXXXXXXXXX", "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" }		
+ * 		};
+ * 		endnode.begin(id[Config::TTN]); // or Config::OPE1 etc ...
  */
-struct LoRaWANEnv {
+struct OTAAId {
 
-	LoRaWANEnv(	initializer_list<u1_t> appEUI, initializer_list<u1_t> devEUI, initializer_list<u1_t> appKEY,
-				const lmic_pinmap& pinmap = *(Arduino_LMIC::GetPinmap_ThisBoard()))
-		: _pinmap(pinmap)
+	OTAAId() {}
+	/*
+	 * AppEUI and DevEUI are NOT reordered by this constructor
+	 */
+	OTAAId(const u1_t *appEUI, const u1_t *devEUI, const u1_t *appKEY)
 	{
-		auto initTab = [] (u1_t * tab, initializer_list<u1_t> & l) {
-			int i = 0;
-			for (u1_t val: l) {
-				tab[i++] = val;
-			}
-		};
-		initTab(_appEUI, appEUI);
-		initTab(_devEUI, devEUI);
-		initTab(_appKEY, appKEY);
+		memcpy(_appEUI, appEUI, arrayCapacity(_appEUI));
+		memcpy(_devEUI, devEUI, arrayCapacity(_devEUI));
+		memcpy(_appKEY, appKEY, arrayCapacity(_appKEY));
+	}
+	/*
+	 * appEUI and devEUI are reordered by this constructor
+	 * 
+	 * ie 10FF become FF10
+	 */
+	OTAAId(const char* appEUI, const char* devEUI, const char* appKEY)
+	{
+		hexCharacterStringToBytes(loraString(appEUI), _appEUI);
+		hexCharacterStringToBytes(loraString(devEUI), _devEUI);
+		hexCharacterStringToBytes(String(appKEY), _appKEY);
 	}
 
-	const lmic_pinmap _pinmap;
-
 	// LoRaWAN OTAA keys
-	u1_t _appEUI[8]		= { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
-	u1_t _devEUI[8]		= { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
-	u1_t _appKEY[16]	= {
-							0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-							0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-																			};
+	
+	u1_t _appEUI[8] = { 0 };		
+	u1_t _devEUI[8] = { 0 };		
+	u1_t _appKEY[16]= { 0 };		
 };
+
+/*
+ * LoRaWan session keys
+ */
+struct LoRaWanSessionKeys {
+	u4_t _netId = 0;
+    devaddr_t _devAddr = 0;
+    u1_t _nwkSKey[16] = { 0 };
+    u1_t _appSKey [16] = { 0 };
+
+	void set() {
+		LMIC_getSessionKeys(&_netId, &_devAddr, _nwkSKey, _appSKey);
+	}
+};
+
 
 /*
  * Message buffer = uint8_t array + size
@@ -82,7 +107,7 @@ struct Message {
 struct UpstreamMessage : Message {
 	bool _ackRequested = false;
 	UpstreamMessage() {}
-	UpstreamMessage(uint8_t* buf, uint8_t len, bool ackRequested)
+	UpstreamMessage(uint8_t* buf, uint8_t len, bool ackRequested = false)
 		: Message(buf, len), _ackRequested(ackRequested)
 	{}
 };
@@ -93,6 +118,11 @@ struct UpstreamMessage : Message {
 struct DownstreamMessage : Message {
 	using Message::Message;
 };
+
+/*
+const char* _lmicEventNames[] = { LMIC_EVENT_NAME_TABLE__INIT };
+const char* _lmicErrorNames[] = { LMIC_ERROR_NAME__INIT };
+*/
 
 /*
  * forward declarations
@@ -113,8 +143,7 @@ public:
 	friend void os_getDevEui(u1_t* buf);
 	friend void os_getDevKey(u1_t* buf);
 
-	LMICWrapper(const LoRaWANEnv& env)
-		: _env(env)
+	LMICWrapper(const lmic_pinmap *pinmap): _pinmap(pinmap)
 	{
 		LMICWrapper::_node = this;
 	}
@@ -124,8 +153,9 @@ public:
 	/*
 	 * Initializes LMIC
 	 */
-	virtual void begin() {
-		os_init_ex( & _env._pinmap);
+	virtual void begin(const OTAAId& env) {
+		_env = env;
+		os_init_ex(_pinmap);
 		initLMIC();
 	}
 
@@ -134,20 +164,30 @@ public:
 	 * if interval == 0 then callback is set with os_setCallback()
 	 * else callback is set with os_setTimedCallback()
 	 *
-	 * ms = number of milliseconds
+	 * interval = number of milliseconds from now
+	 * exec time = current time + interval
 	 */
-	virtual void setCallback(osjob_t& job, long ms = 0) {
-		setTimedCallback(job, ms2osticks(ms));
+	virtual void setCallback(osjob_t* job, unsigned long interval = 0) final {
+		_sendJobRequested = (job == & _sendJob);
+		_jobCount += 1;
+		os_setTimedCallback(job, os_getTime() + ms2osticks(interval), do_it);
 	}
 
-	virtual void setTimedCallback(osjob_t& job, ostime_t when) {
-		_jobCount += 1;
-		if (when) {
-			os_setTimedCallback(&job, os_getTime() + when, do_it);
-		}
-		else {
-			os_setCallback(&job, do_it);
-		}
+	virtual void setCallback(osjob_t& job, unsigned long interval = 0) final {
+		setCallback(&job, interval);
+	}
+
+	/*
+	 * Return the time interval you have to wait to be able to send a message
+	 * according to the duty cycle.
+	 * 
+	 * Returns a number of ms
+	 */
+	unsigned long dutyCycleWaitTimeInterval() {
+		unsigned long now = millis();
+		unsigned long when = osticks2ms(LMIC.globalDutyAvail);
+		when = (when <= now ? 0 : when-now);  
+		return when;
 	}
 
 	/*
@@ -157,9 +197,8 @@ public:
 	 */
 	virtual void runLoopOnce() final {
 		// if msg pending and LMIC doing nothing -> create a new LMIC job
-		if (!_sendJobRequested && hasMessageToSend() && !isRadioBusy() && !isTxDataPending()) {
-			_sendJobRequested = true;
-			setTimedCallback(_sendJob, LMIC.globalDutyAvail);
+		if (!_sendJobRequested && hasMessageToSend() && !isRadioBusy()) {
+			setCallback(&_sendJob, dutyCycleWaitTimeInterval());
 		}
 		os_runloop_once();
 	}
@@ -168,9 +207,7 @@ public:
 	 * Push a message to the front of the FIFO waiting queue
 	 */
 	virtual void send(const UpstreamMessage & message) {
-		noInterrupts();
 		_messages.push_front(message);
-		interrupts();
 	}
 
 	/*
@@ -184,29 +221,33 @@ public:
 	 * Returns true if LMIC radio is pending
 	 */
 	bool isRadioBusy() {
-		return (LMIC.opmode & OP_TXRXPEND);
-	}
-
-	/*
-	 * Returns true if TX buffer contains data for sending
-	 */
-	bool isTxDataPending() {
-		return (LMIC.opmode & OP_TXDATA);
+		return (LMIC.opmode & OP_TXRXPEND) || (LMIC.opmode & OP_TXDATA);
 	}
 
 	/*
 	 * Return true if the device can be put in standby mode.
 	 */
 	virtual bool isReadyForStandby() {
-		return _joined && (_jobCount == 0) && !hasMessageToSend() && !isRadioBusy() && !isTxDataPending();
+		return _joined && (_jobCount == 0) && !hasMessageToSend() && !isRadioBusy();
+	}
+
+	/*
+	 * Returns LoRaWan session keys (netid, netaddr, nwskey, appskey) 
+	 */
+	const LoRaWanSessionKeys & getSessionKeys() {
+		return _sessionKeys;
 	}
 
 protected:
 
 	static LMICWrapper* _node;
 
+	// device pinmap
+	const lmic_pinmap *_pinmap;
+
 	// LoRaWAN environment
-	const LoRaWANEnv _env;
+	OTAAId _env;
+	LoRaWanSessionKeys _sessionKeys;
 
 	// active osjob counter
 	int _jobCount = 0;
@@ -218,10 +259,11 @@ protected:
 	bool _joined = false;
 
 	// FIFO messages waiting to be sent
-	deque<UpstreamMessage> _messages;			
+	deque<UpstreamMessage, true, 100> _messages;			
 
 	/*
 	 * Reset LMIC, and set LMIC parameters
+	 * ADR is set
 	 */
 	virtual void initLMIC() {
 		LMIC_reset();
@@ -232,41 +274,49 @@ protected:
 	/*
 	 * Called by LMIC when a given job should be performed
 	 * This job has been previously registered with setCallback()
-	 * This method should be overriden by subclass if other callbacks are used
-	 * In this case do not forget to call LMICWrapper::performJob()
+	 * If other callbacks are used, override completeJob()
 	 */
-	virtual void performJob(osjob_t* job) {
+	virtual void performJob(osjob_t* job) final {
 		_jobCount -= 1;
 		if (job == &_sendJob) {
 			_sendJobRequested = false;
-			send();
+			if (!isRadioBusy()) {
+				lmicSend();
+			}
+		} else {
+			completeJob(job);
 		}
 	}
 
 	/*
-	 * Calls LMIC_setTxData2() if not busy
+	 * This method should be overriden by subclass if other callbacks are used
 	 */
-	virtual void send() {
-		if (!isTxDataPending() && !isRadioBusy() && hasMessageToSend()) {
-			UpstreamMessage msg = _messages.back();
-			lmicSend(msg._buf, msg._len, msg._ackRequested);
-		}
+	virtual void completeJob(osjob_t* job) {
+	}
+
+	/*
+	 * Calls LMIC_setTxData2() if message to send
+	 */
+	virtual void lmicSend() {
+		if (UpstreamMessage* msg = _messages.backPtr(); msg != nullptr) {
+			LMIC_setTxData2(1, msg->_buf, msg->_len, msg->_ackRequested);
+		} 
 	}
 
 	/*
 	  * LMIC event callback
-	  *
-	  * lmic.h -> enum _ev_t { EV_SCAN_TIMEOUT=1, EV_BEACON_FOUND,
-	  *        EV_BEACON_MISSED, EV_BEACON_TRACKED, EV_JOINING,
-	  *        EV_JOINED, EV_RFU1, EV_JOIN_FAILED, EV_REJOIN_FAILED,
-	  *        EV_TXCOMPLETE, EV_LOST_TSYNC, EV_RESET,
-	  *        EV_RXCOMPLETE, EV_LINK_DEAD, EV_LINK_ALIVE, EV_SCAN_FOUND,
-	  *        EV_TXSTART };
+	  * enum _ev_t { EV_SCAN_TIMEOUT=1, EV_BEACON_FOUND,
+      *       EV_BEACON_MISSED, EV_BEACON_TRACKED, EV_JOINING,
+      *       EV_JOINED, EV_RFU1, EV_JOIN_FAILED, EV_REJOIN_FAILED,
+      *       EV_TXCOMPLETE, EV_LOST_TSYNC, EV_RESET,
+      *       EV_RXCOMPLETE, EV_LINK_DEAD, EV_LINK_ALIVE, EV_SCAN_FOUND,
+      *       EV_TXSTART, EV_TXCANCELED, EV_RXSTART, EV_JOIN_TXCOMPLETE };
 	  */
 	virtual void onEvent(ev_t ev) {
 		switch (ev) {
 			case EV_JOINED:
 				_joined = true;
+				_sessionKeys.set();
 				joined(true);
 				break;
 			case EV_JOIN_FAILED:
@@ -274,6 +324,7 @@ protected:
 			case EV_RESET:
 			case EV_LINK_DEAD:
 				_joined = false;
+				_sessionKeys = LoRaWanSessionKeys();
 				joined(false);
 				break;
 			case EV_TXCOMPLETE:
@@ -296,11 +347,10 @@ protected:
 	 *  removes sent message from the FIFO to avoid another transmission
 	 */
 	virtual void txComplete() {
-		UpstreamMessage sent = _messages.back();
-		if (isTxCompleted(sent, sent._ackRequested, (LMIC.txrxFlags & TXRX_NACK) == 0)) {
-			noInterrupts();
-			_messages.pop_back(); // message is removed from FIFO
-			interrupts();
+		if (UpstreamMessage *sent = _messages.backPtr(); sent != nullptr) {
+			if (isTxCompleted(*sent, (LMIC.txrxFlags & TXRX_NACK) == 0)) {
+				_messages.pop_back(); // message is removed from FIFO
+			}
 		}
 		// RX1 or RX2 ?
 		if (LMIC.dataLen > 0) {
@@ -315,18 +365,18 @@ protected:
 	/*
 	 * Default send completion policy
 	 */
-	virtual bool isTxCompleted(const UpstreamMessage & message, bool ackRequested, bool ack) {
+	virtual bool isTxCompleted(const UpstreamMessage & message, bool ack) {
 		return ack;
 	};
 
-	virtual void downlinkReceived(const DownstreamMessage&) {}
-
 	/*
-	 * Fills in LMIC buffer for sending
+	 * Downlink message arrival callback
+	 * 
+	 * Override if needed
 	 */
-	void lmicSend(uint8_t* data, uint8_t len, bool ackRequested) {
-		LMIC_setTxData2(1, data, len, ackRequested);
+	virtual void downlinkReceived(const DownstreamMessage&) {
 	}
+
 };
 
 /*
@@ -348,8 +398,8 @@ void do_it(osjob_t* j) 			{ LMICWrapper::_node->performJob(j); }
  * Encodes src object using nanopb into dest
  */
 template<typename PBType>
-size_t encode(const PBType & src, const pb_field_t * fields, Message & dest) {
-	pb_ostream_t stream = pb_ostream_from_buffer(dest._buf, sizeof dest._buf);
+size_t encode(const PBType & src, const pb_msgdesc_t * fields, Message & dest) {
+	pb_ostream_t stream = pb_ostream_from_buffer(dest._buf, arrayCapacity(dest._buf));
 	if (pb_encode(&stream, fields, &src)) {
 		dest._len = stream.bytes_written;
 	}
@@ -363,7 +413,7 @@ size_t encode(const PBType & src, const pb_field_t * fields, Message & dest) {
  * Builds dest object using nanopb from src raw message
  */
 template <typename PBType>
-bool decode(const Message& src, const pb_field_t* fields, PBType & dest) {
+bool decode(const Message& src, const pb_msgdesc_t* fields, PBType & dest) {
 	pb_istream_t stream = pb_istream_from_buffer(src._buf, src._len);
 	return pb_decode(&stream, fields, &dest);
 }
@@ -373,61 +423,25 @@ bool decode(const Message& src, const pb_field_t* fields, PBType & dest) {
  * U = uplink message nanopb type
  * D = downlink message nanopb type
  */
-template <typename U, const pb_field_t * UFIELDS, typename D, const pb_field_t* DFIELDS>
+template <typename U, const pb_msgdesc_t* UFIELDS, typename D, const pb_msgdesc_t* DFIELDS>
 class ProtobufEndnode: public LMICWrapper {
 public:
 
-	ProtobufEndnode(const LoRaWANEnv &env)
-		: LMICWrapper(env) {
-	}
-
+	using LMICWrapper::LMICWrapper;
+	
 	/*
-	 * Build an UpMessage filled with encoded bytes from payload
-	 * This message is stored in the double-ended queue manage by LMICWrapper.
+	 * Build an UpstreamMessage filled with encoded bytes from payload
+	 * This message is stored in the double-ended queue managed by LMICWrapper.
 	 * Back of this deque is sent after call to runLoopOnce()
 	 *
 	 * fields parameter provides the way to send partial message
 	 */
-	virtual void send(const U & payload, bool ackRequested = true, const pb_field_t* fields = UFIELDS) {
+	virtual void send(const U & payload, bool ackRequested = true, const pb_msgdesc_t* fields = UFIELDS) {
 		UpstreamMessage upMessage;
 		upMessage._ackRequested = ackRequested;
 		if (encode(payload, fields, upMessage)) {
 			LMICWrapper::send(upMessage);
 		}
-	}
-
-protected:
-
-	virtual void downlinkReceived(const DownstreamMessage & message) override {
-		D downstreamPayload;
-		if (decode(message, DFIELDS, downstreamPayload)) {
-			downlinkReceived(downstreamPayload);
-		}
-	}
-
-	/*
-	 * Override if needed
-	 */
-	virtual void downlinkReceived(const D& payload) {
-		// do something if needed
-	}
-
-	/*
-	 * Default send completion policy
-	 */
-	virtual bool isTxCompleted(const UpstreamMessage& message, bool ackRequested, bool ack) override {
-		U payload;
-		if (decode(message, UFIELDS, payload))
-			return isTxCompleted(payload, ackRequested, ack);
-		else
-			return false;
-	};
-
-	/*
-	 * May be overriden if needed
-	 */
-	virtual bool isTxCompleted(const U & message, bool ackRequested, bool ack) {
-		return ack;
 	}
 
 };

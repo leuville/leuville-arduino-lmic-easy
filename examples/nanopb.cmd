@@ -1,1 +1,5 @@
-"C:\Dev\nanopb-0.3.9.3-windows-x86\generator-bin\protoc" --nanopb_out=. message.proto
+set PROTOC_HOME="C:\Dev\nanopb-0.4.1-windows-x86"
+
+set PROTO=message
+
+%PROTOC_HOME%\generator-bin\protoc.exe --nanopb_out=src %PROTO%.proto

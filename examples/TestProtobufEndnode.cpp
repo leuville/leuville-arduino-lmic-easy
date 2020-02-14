@@ -2,10 +2,6 @@
  * TestProtobufEndnode
  */
 
-#include <Arduino.h>
-
-#define ARDUINO_SAMD_FEATHER_M0	1
-
 // leuville-arduino-easy-lmic
 #include <LMICWrapper.h>
 // leuville-arduino-utilities
@@ -17,22 +13,8 @@
 // nanopb (Protocol Buffer)
 #include "message.pb.h"
 
-/* 
- * ---------------------------------------------------------------------------------------
- * PIN mappings
- *
- * (!) DO NOT FORGET TO CONNECT DIO1 with D6 on Feather M0 LoRa board
- * ---------------------------------------------------------------------------------------
- */
-const lmic_pinmap feather_m0_lora_pins = {
-	.nss			= 8,						// CS
-	.rxtx			= LMIC_UNUSED_PIN,
-	.rst			= LMIC_UNUSED_PIN,
-	.dio			= {3, 6, LMIC_UNUSED_PIN},	// {DIO0 = IRQ, DIO1, DIO2}
-	.rxtx_rx_active = 0,
-	.rssi_cal		= 8,						// LBT cal for the Adafruit Feather M0 LoRa, in dB
-	.spi_freq		= 8000000
-};
+// LoRaWAN configuration: see OTAAId in LMICWrapper.h
+#include <lora-common-defs.h>
 
 /* ---------------------------------------------------------------------------------------
  * Application classes
@@ -45,8 +27,8 @@ const lmic_pinmap feather_m0_lora_pins = {
  * Instanciated with nanopb generated types for uplink & downlink messages
  */
 using Base = ProtobufEndnode<
-	leuville_Uplink, leuville_Uplink_size, leuville_Uplink_fields,
-	leuville_Downlink, leuville_Downlink_size, leuville_Downlink_fields
+	leuville_Uplink, leuville_Uplink_fields,
+	leuville_Downlink, leuville_Downlink_fields
 >;
 
 /*
@@ -62,6 +44,8 @@ class EndNode : public Base, ISRTimer, ISRWrapper<A0>, StandbyMode {
 	 */
 	osjob_t _buttonJob;
 	osjob_t _timeoutJob;
+	osjob_t _joinJob;
+	osjob_t _txCompleteJob;
 
 	/*
 	 * Message send retry mechanism
@@ -71,9 +55,9 @@ class EndNode : public Base, ISRTimer, ISRWrapper<A0>, StandbyMode {
 
 public:
 
-	EndNode(RTCZero& rtc, const LoRaWANEnv& env)
-		: Base(env),
-		ISRTimer(rtc, 5 * 60, true),
+	EndNode(const lmic_pinmap *pinmap, RTCZero& rtc): 
+		Base(pinmap),
+		ISRTimer(rtc, 1 * 60, true),
 		ISRWrapper<A0>(INPUT_PULLUP, LOW),
 		StandbyMode(rtc)
 	{
@@ -82,15 +66,14 @@ public:
 	/*
 	 * delegates begin() to each sub-component and send a PING message
 	 */
-	void begin() {
-		ISRTimer::_rtc.begin(true);
-		ISRTimer::_rtc.setDate(1, 1, 0);
-		Base::begin();
+	void begin(const OTAAId& id) {
+		ISRTimer::begin(true);
+		Base::begin(id);
 		StandbyMode::begin();
 		ISRWrapper<A0>::begin();
 
 		ISRWrapper<A0>::enable();
-		setCallback(_timeoutJob);
+		setCallback(&_buttonJob, 2000); // send first message
 	}
 
 	/*
@@ -111,23 +94,27 @@ public:
 		setCallback(_timeoutJob);
 	}
 
+	/*
+	 * Job done on join/unjoin
+	 * see completeJob()
+	 */
 	virtual void joined(boolean ok) override {
 		if (ok) {
-			ISRTimer::enable();
-		}
-		else {
-			ISRTimer::disable();
+			setCallback(_joinJob);
 		}
 	}
 
 	/*
-	 * In all cases: must call Base::postSend() to remove sent message from the FIFO and avoid another transmission
-	 * this job is done by the Base implementation of txComplete()
-	 * 
-	 * In our case: implements a retry policy for important messages in case of unsuccessful transmission
+	 * Implements a retry policy for important messages in case of unsuccessful transmission
 	 */
-	virtual boolean isTxCompleted(const leuville_Uplink& payload, boolean ackRequested, boolean ack) override {
-		if (ack || !ackRequested) {
+	virtual bool isTxCompleted(const UpstreamMessage & message, bool ack) override {
+		setCallback(_txCompleteJob);
+		leuville_Uplink payload;
+		decode(message, leuville_Uplink_fields, payload);
+		Serial.print("isTxCompleted ");Serial.print(payload.battery);
+		Serial.print(" ");Serial.print(payload.type);Serial.print(" ");
+		Serial.print(message._ackRequested); Serial.print(" ");Serial.println(ack);
+		if (ack || !message._ackRequested) {
 			_nbRetries = 0;
 			return true;
 		} else {
@@ -139,24 +126,43 @@ public:
 		return false;
 	};
 
-	virtual void downlinkReceived(const leuville_Downlink& payload) override {
-		ISRTimer::setTimeout(payload.pingDelay);
+	/*
+	 * Updates the timer delay
+	 */
+	virtual void downlinkReceived(const DownstreamMessage & message) override {
+		leuville_Downlink payload;
+		if (decode(message, leuville_Downlink_fields, payload)) {
+			Serial.print("downlink delay: "),Serial.println(payload.pingDelay);
+			ISRTimer::setTimeout(payload.pingDelay);
+		}
 	}
 
-	virtual void performJob(osjob_t* job) override {
+	/*
+	 * Handle LMIC callbacks
+	 */
+	virtual void completeJob(osjob_t* job) override {
 		if (job == &_buttonJob) {
 			ISRTimer::disable();
 			ISRTimer::enable();
-			send(buildPayload(leuville_Type_BUTTON), false); // true -> ACK -> slower
+			send(buildPayload(leuville_Type_BUTTON), true); 
 		} else if (job == &_timeoutJob) {
 			if (!hasMessageToSend()) {
 				send(buildPayload(leuville_Type_PING), false);
 			}
+		} else if (job == &_joinJob) {
+			LoRaWanSessionKeys keys = getSessionKeys();
+			// https://www.thethingsnetwork.org/docs/lorawan/prefix-assignments.html
+			Serial.print("netId: "); Serial.println(keys._netId, HEX);
+			Serial.print("devAddr: "); Serial.println(keys._devAddr, HEX);
+			Serial.print("nwkSKey: "); printHex(keys._nwkSKey, arrayCapacity(keys._nwkSKey));
+			Serial.print("appSKey: "); printHex(keys._appSKey, arrayCapacity(keys._appSKey));
+			if (keys._netId == 0x000013) { // TTN
+				LMIC_setLinkCheckMode(0);	
+			}
+			ISRTimer::enable();
+		} else if (job == &_txCompleteJob) {
+			Serial.print("FIFO size: ");Serial.println(_messages.size());
 		}
-		// ***************
-		// DO NOT REMOVE !
-		// ***************
-		Base::performJob(job);
 	}
 
 	/*
@@ -167,6 +173,15 @@ public:
 		payload.battery = getBatteryPower();
 		payload.type = uplinkType;
 		return payload;
+	}
+
+	/*
+	 * Post a message in the send queue
+	 */
+	void send(const leuville_Uplink & payload, bool ack = false) {
+		Serial.print("send ");
+		Serial.print(payload.battery); Serial.print(" ");Serial.println(payload.type);
+		Base::send(payload, ack);
 	}
 
 	/*
@@ -184,19 +199,8 @@ public:
  */
 RTCZero 	rtc;
 BlinkingLed statusLed(LED_BUILTIN, 500);
+EndNode 	endnode(Arduino_LMIC::GetPinmap_ThisBoard(), rtc); 
 
-LoRaWANEnv env(
-	// APPEUI
-	{ 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA },
-	// DEVEUI
-	{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xDE },
-	// APPKEY
-	{ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF },
-	// PINS
-	feather_m0_lora_pins
-);
-
-EndNode endnode(rtc, env);
 
 /* ---------------------------------------------------------------------------------------
  * ARDUINO FUNCTIONS
@@ -205,12 +209,13 @@ EndNode endnode(rtc, env);
 void setup()
 {
 	Serial.begin(115200);
-	delay(1000);
 
 	statusLed.begin();
 	statusLed.on();
 
-	endnode.begin();
+	while (!Serial.available()) {}
+
+	endnode.begin(id[Config::TTN]);
 
 	delay(5000);
 	statusLed.off();
@@ -221,7 +226,7 @@ void loop()
 	endnode.runLoopOnce();
 	if (endnode.isReadyForStandby()) {
 		statusLed.off();
-		endnode.standby();
+		//endnode.standby(); 		// uncomment to enable powersaving mode
 	}
 	else {
 		statusLed.blink();

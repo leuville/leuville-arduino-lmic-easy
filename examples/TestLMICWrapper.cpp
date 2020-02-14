@@ -1,10 +1,6 @@
 /*
- * TestLeuvilleLMIC
+ * TestLMICWrapper
  */
-
-#include <Arduino.h>
-
-#define ARDUINO_SAMD_FEATHER_M0	1
 
 // leuville-arduino-easy-lmic
 #include <LMICWrapper.h>
@@ -14,22 +10,7 @@
 #include <energy.h>
 #include <StatusLed.h>
 
-/* 
- * ---------------------------------------------------------------------------------------
- * PIN mappings
- *
- * (!) DO NOT FORGET TO CONNECT DIO1 with D6 on Feather M0 LoRa board
- * ---------------------------------------------------------------------------------------
- */
-const lmic_pinmap feather_m0_lora_pins = {
-	.nss			= 8,						// CS
-	.rxtx			= LMIC_UNUSED_PIN,
-	.rst			= LMIC_UNUSED_PIN,
-	.dio			= {3, 6, LMIC_UNUSED_PIN},	// {DIO0 = IRQ, DIO1, DIO2}
-	.rxtx_rx_active = 0,
-	.rssi_cal		= 8,						// LBT cal for the Adafruit Feather M0 LoRa, in dB
-	.spi_freq		= 8000000
-};
+#include <lora-common-defs.h>
 
 /* ---------------------------------------------------------------------------------------
  * Application classes
@@ -51,35 +32,38 @@ class EndNode : public Base, ISRTimer, ISRWrapper<A0>, StandbyMode {
 	 */
 	osjob_t _buttonJob;
 	osjob_t _timeoutJob;
+	osjob_t _joinJob;
+	osjob_t _txCompleteJob;
+
+	int _count = 0;
 
 public:
 
-	EndNode(RTCZero& rtc, const LoRaWANEnv& env)
-		: Base(env),
-		ISRTimer(rtc, 5 * 60, true),
+	EndNode(const lmic_pinmap *pinmap, RTCZero& rtc): 
+		Base(pinmap),
+		ISRTimer(rtc, 3 * 60, true),
 		ISRWrapper<A0>(INPUT_PULLUP, LOW),
 		StandbyMode(rtc)
 	{
 	}
 
 	/*
-	 * delegates begin() to each sub-component and send an "INIT" message
+	 * delegates begin() to each sub-component and send a first message
 	 */
-	void begin() {
-		ISRTimer::_rtc.begin(true);
-		ISRTimer::_rtc.setDate(1, 1, 0);
-		Base::begin();
+	virtual void begin(const OTAAId& id) override {
+		ISRTimer::begin(true);
+		Base::begin(id);
 		StandbyMode::begin();
 		ISRWrapper<A0>::begin();
 
 		ISRWrapper<A0>::enable();
-		setCallback(_timeoutJob);
+		setCallback(_buttonJob, 2000); // send first message with 2s delay
 	}
 
 	/*
 	 * Button ISR
 	 * job done by sending a LMIC callback
-	 * see performJob()
+	 * see completeJob()
 	 */
 	virtual void ISR_callback(uint8_t pin) override {
 		setCallback(_buttonJob);
@@ -88,43 +72,75 @@ public:
 	/*
 	 * Timer ISR
 	 * job done by sending a LMIC callback
-	 * see performJob()
+	 * see completeJob()
 	 */
 	virtual void ISR_timeout() override {
 		setCallback(_timeoutJob);
 	}
 
 	/*
-	 * Starts timer when joined
+	 * Job done on join/unjoin
+	 * see completeJob()
 	 */
-	virtual void joined(boolean ok) override {
+	virtual void joined(bool ok) override {
 		if (ok) {
-			ISRTimer::enable();
-		} else {
-			ISRTimer::disable();
+			setCallback(_joinJob);
 		}
 	}
 
+	/*
+	 * Updates the timer delay
+	 */
 	virtual void downlinkReceived(const DownstreamMessage & message)  {
 		if (message._len > 0) {
 			ISRTimer::setTimeout((uint32_t)strtoul((char*)message._buf, nullptr, 10));
 		}
 	}
 
-	virtual void performJob(osjob_t* job) override {
+	/*
+	 * Handle LMIC callbacks
+	 */
+	virtual void completeJob(osjob_t* job) override {
 		if (job == &_buttonJob) {
-			uint8_t msg[] = "CLICK";
-			UpstreamMessage payload(msg, sizeof(msg), true);
-			send(payload);
+			send("CLICK", true);
 		} else if (job == &_timeoutJob) {
-			uint8_t msg[] = "TIMEOUT";
-			UpstreamMessage payload(msg, sizeof(msg), false);
-			send(payload);
-		} 
-		//
-		// DO NOT REMOVE !
-		//
-		Base::performJob(job);
+			const char* format = "TIMEOUT %d";
+			char msg[80];
+			sprintf(msg, format, _count++);
+			send(msg, false);
+		} else if (job == &_joinJob) {
+			LoRaWanSessionKeys keys = getSessionKeys();
+			// https://www.thethingsnetwork.org/docs/lorawan/prefix-assignments.html
+			Serial.print("netId: "); Serial.println(keys._netId, HEX);
+			Serial.print("devAddr: "); Serial.println(keys._devAddr, HEX);
+			Serial.print("nwkSKey: "); printHex(keys._nwkSKey, arrayCapacity(keys._nwkSKey));
+			Serial.print("appSKey: "); printHex(keys._appSKey, arrayCapacity(keys._appSKey));
+			if (keys._netId == 0x000013) { // TTN
+				LMIC_setLinkCheckMode(0);	
+			}
+			ISRTimer::enable();
+		} else if (job == &_txCompleteJob) {
+			Serial.print("FIFO size: ");Serial.println(_messages.size());
+		}
+	}
+
+	/*
+	 * Build and send Uplink message
+	 */
+	void send(const char* message, bool ack = false) {
+		UpstreamMessage payload((uint8_t*)message, strlen(message)+1, ack);
+		Serial.print("send ");Serial.println(message);
+		Base::send(payload);
+	}
+
+	/*
+	 * LMIC callback called on TX_COMPLETE event
+	 */
+	virtual bool isTxCompleted(const UpstreamMessage & message, bool ack) override {
+		setCallback(_txCompleteJob);
+		Serial.print("isTxCompleted ");Serial.print((char*)message._buf); 
+		Serial.print(" / ");Serial.println(ack);
+		return Base::isTxCompleted(message, ack);
 	}
 
 	/*
@@ -142,24 +158,7 @@ public:
  */
 RTCZero 	rtc;
 BlinkingLed statusLed(LED_BUILTIN, 500);
-
-/*
- * LoRaWAN settings
- *
- * Replace keys by appropriate values
- */
-LoRaWANEnv env(
-	// APPEUI
-	{ 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA },
-	// DEVEUI
-	{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xDE },
-	// APPKEY
-	{ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF },
-	// PINS
-	feather_m0_lora_pins
-);
-
-EndNode endnode(rtc, env);
+EndNode 	endnode(Arduino_LMIC::GetPinmap_ThisBoard(), rtc); 
 
 /* ---------------------------------------------------------------------------------------
  * ARDUINO FUNCTIONS
@@ -168,12 +167,13 @@ EndNode endnode(rtc, env);
 void setup()
 {
 	Serial.begin(115200);
-	delay(1000);
 
 	statusLed.begin();
 	statusLed.on();
 
-	endnode.begin();
+	while (!Serial.available()) {}
+
+	endnode.begin(id[Config::TTN]);
 
 	delay(5000);
 	statusLed.off();
@@ -184,7 +184,7 @@ void loop()
 	endnode.runLoopOnce();
 	if (endnode.isReadyForStandby()) {
 		statusLed.off();
-		endnode.standby();
+		//endnode.standby(); 	// uncomment to enable powersaving mode
 	}
 	else {
 		statusLed.blink();
