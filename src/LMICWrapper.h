@@ -82,8 +82,27 @@ struct LoRaWanSessionKeys {
 	}
 };
 
+/* 
+ * LMIC Channel
+ */
+struct LMICChannel {
+	u1_t _chidx;
+	u4_t _freq;
+	u2_t _drmap; 
+	s1_t _band;
 
-/*
+	LMICChannel(u1_t chidx, u4_t freq, u2_t drmap, s1_t band)
+		: _chidx(chidx), _freq(freq), _drmap(drmap), _band(band)
+	{}
+};
+
+void initLMICChannels(LMICChannel *channels, u1_t nb) {
+	for (u1_t i = 0; i < nb; i++) {
+		LMIC_setupChannel(channels[i]._chidx, channels[i]._freq, channels[i]._drmap, channels[i]._band);
+	}
+}
+
+/* 
  * Message buffer = uint8_t array + size
  * Acts as a base class for UpstreamMessage and DownstreamMessage
  */
@@ -120,11 +139,6 @@ struct DownstreamMessage : Message {
 };
 
 /*
-const char* _lmicEventNames[] = { LMIC_EVENT_NAME_TABLE__INIT };
-const char* _lmicErrorNames[] = { LMIC_ERROR_NAME__INIT };
-*/
-
-/*
  * forward declarations
  */
 void onEvent(ev_t ev);
@@ -153,10 +167,12 @@ public:
 	/*
 	 * Initializes LMIC
 	 */
-	virtual void begin(const OTAAId& env) {
+	virtual void begin(const OTAAId& env, u4_t network, bool adr = true) {
 		_env = env;
 		os_init_ex(_pinmap);
-		initLMIC();
+		LMIC_reset();
+		LMIC_setClockError(MAX_CLOCK_ERROR * 10 / 100); // tweak to speed up the JOIN time
+		initLMIC(network, adr);
 	}
 
 	/*
@@ -262,13 +278,10 @@ protected:
 	deque<UpstreamMessage, true, 100> _messages;			
 
 	/*
-	 * Reset LMIC, and set LMIC parameters
-	 * ADR is set
+	 * Set ADR
 	 */
-	virtual void initLMIC() {
-		LMIC_reset();
-		LMIC_setClockError(MAX_CLOCK_ERROR * 10 / 100); // tweak to speed up the JOIN time
-		LMIC_setAdrMode(1);
+	virtual void initLMIC(u4_t network, bool adr = true) {
+		LMIC_setAdrMode(adr ? 1 : 0);
 	}
 
 	/*
