@@ -12,14 +12,22 @@
 
 #include <fixed-deque.h>
 
-#include <lmic.h>
+#include <Arduino_lmic.h>
 #include <hal/hal.h>
 #include <lmic/oslmic.h>
 
-#include <pb_encode.h>
-#include <pb_decode.h>
-
 #include <misc-util.h>
+
+#ifndef LEUVILLE_LORA_QUEUE_LEN
+#define LEUVILLE_LORA_QUEUE_LEN 10
+#endif
+
+namespace lstl = leuville::simple_template_library;
+
+using namespace lstl;
+
+namespace leuville {
+namespace lora {
 
 /*
  * LoRaWAN configuration: OTAA keys
@@ -35,7 +43,7 @@
  *			{ "70B3D59BXXXXXXXX", "70B3D5XXXXXXXXXX", "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" },		
  * 			{ "7BB592C0XXXXXXXX", "000000XXXXXXXXXX", "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" }		
  * 		};
- * 		endnode.begin(id[Config::TTN]); // or Config::OPE1 etc ...
+ * 		endnode.begin(id[Config::TTN], ...); // or Config::OPE1 etc ...
  */
 struct OTAAId {
 
@@ -52,7 +60,7 @@ struct OTAAId {
 	/*
 	 * appEUI and devEUI are reordered by this constructor
 	 * 
-	 * ie 10FF become FF10
+	 * ie 10FF becomes FF10
 	 */
 	OTAAId(const char* appEUI, const char* devEUI, const char* appKEY)
 	{
@@ -142,7 +150,8 @@ struct DownstreamMessage : Message {
  * forward declarations
  */
 void onEvent(ev_t ev);
-void do_it(osjob_t* j);
+
+constexpr uint32_t defaultNetworkTimeSyncDelay = 24 * 60 * 60;
 
 /*
  * LMIC base class
@@ -151,13 +160,25 @@ void do_it(osjob_t* j);
  */
 class LMICWrapper {
 public:
-	friend void onEvent(ev_t ev);
-	friend void do_it(osjob_t* j);
-	friend void os_getArtEui(u1_t* buf);
-	friend void os_getDevEui(u1_t* buf);
-	friend void os_getDevKey(u1_t* buf);
 
-	LMICWrapper(const lmic_pinmap *pinmap): _pinmap(pinmap)
+	using LMICdeque = deque<UpstreamMessage, true, LEUVILLE_LORA_QUEUE_LEN>;
+
+	enum {
+		KEEP_RECENT	= LMICdeque::KEEP_FRONT,
+		KEEP_OLD 	= LMICdeque::KEEP_BACK
+	};
+
+	friend void ::onEvent(ev_t ev);
+	friend void ::os_getArtEui(u1_t* buf);
+	friend void ::os_getDevEui(u1_t* buf);
+	friend void ::os_getDevKey(u1_t* buf);
+
+	/*
+	 * The device send a network time sync request on a regular basis 
+	 * (if networkTimeSyncDelay is not zero )
+	 */
+	LMICWrapper(const lmic_pinmap *pinmap, uint32_t networkTimeSyncDelay = defaultNetworkTimeSyncDelay, uint8_t policy = KEEP_RECENT)
+		: _pinmap(pinmap), _messages(policy), _networkTimeSyncDelay(networkTimeSyncDelay)
 	{
 		LMICWrapper::_node = this;
 	}
@@ -171,7 +192,6 @@ public:
 		_env = env;
 		os_init_ex(_pinmap);
 		LMIC_reset();
-		LMIC_setClockError(MAX_CLOCK_ERROR * 10 / 100); // tweak to speed up the JOIN time
 		initLMIC(network, adr);
 	}
 
@@ -186,11 +206,25 @@ public:
 	virtual void setCallback(osjob_t* job, unsigned long interval = 0) final {
 		_sendJobRequested = (job == & _sendJob);
 		_jobCount += 1;
-		os_setTimedCallback(job, os_getTime() + ms2osticks(interval), do_it);
+		os_setTimedCallback(job, os_getTime() + ms2osticks(interval), LMICWrapper::jobCallback);
 	}
 
 	virtual void setCallback(osjob_t& job, unsigned long interval = 0) final {
 		setCallback(&job, interval);
+	}
+
+	/*
+	 * Clear a callback job
+	 */
+	virtual void unsetCallback(osjob_t* job) final {
+		os_clearCallback(job);
+	}
+
+	/*
+	 * Check if a callback job is registered
+	 */
+	virtual bool hasCallback(osjob_t* job) final {
+		return os_jobIsTimed(job);
 	}
 
 	/*
@@ -221,9 +255,13 @@ public:
 
 	/*
 	 * Push a message to the front of the FIFO waiting queue
+	 *
+	 * If FIFO is full, oldest message is removed if policy is KEEP_RECENT then current message is queued
+	 * 
+	 * Returns true if message queued, false otherwise
 	 */
-	virtual void send(const UpstreamMessage & message) {
-		_messages.push_front(message);
+	virtual bool send(const UpstreamMessage & message) {
+		return _messages.push_front(message);
 	}
 
 	/*
@@ -231,6 +269,13 @@ public:
 	 */
 	virtual bool hasMessageToSend() {
 		return (_messages.size() > 0);
+	}
+
+	/* 
+	 * Start JOIN sequence
+	 */
+	virtual void startJoining() {
+		LMIC_startJoining();
 	}
 
 	/*
@@ -254,8 +299,19 @@ public:
 		return _sessionKeys;
 	}
 
+	/*
+	 * May be overriden to update system time when network time is received
+	 */
+	virtual void updateSystemTime(uint32_t newTime) {
+	}
+
+	static LMICWrapper & node() { 
+		return *_node; 
+	}
+
 protected:
 
+	// singleton
 	static LMICWrapper* _node;
 
 	// device pinmap
@@ -275,13 +331,64 @@ protected:
 	bool _joined = false;
 
 	// FIFO messages waiting to be sent
-	deque<UpstreamMessage, true, 100> _messages;			
+	LMICdeque _messages;			
+
+	// members to manage network time sync
+	uint32_t _lastNetworkTimeSync = 0;
+	const uint32_t _networkTimeSyncDelay = defaultNetworkTimeSyncDelay; 
+
+	/*
+	 * Network time callback
+	 */
+	static void networkTimeCallback(void *paramUserUTCTime, int flagSuccess) {
+		if (flagSuccess == 0)
+			return;
+
+		uint32_t newTime = 0;
+
+		// A struct that will be populated by LMIC_getNetworkTimeReference.
+		// It contains the following fields:
+		//  - tLocal: the value returned by os_GetTime() when the time
+		//            request was sent to the gateway, and
+		//  - tNetwork: the seconds between the GPS epoch and the time
+		//              the gateway received the time request
+		lmic_time_reference_t lmicTimeReference;
+
+		if (LMIC_getNetworkTimeReference(&lmicTimeReference) == 0) {
+			return;
+		}
+
+		// Update userUTCTime, considering the difference between the GPS and UTC
+		// epoch, and the leap seconds
+		newTime = lmicTimeReference.tNetwork + 315964800;
+
+		// Add the delay between the instant the time was transmitted and
+		// the current time
+
+		// Current time, in ticks
+		ostime_t ticksNow = os_getTime();
+		// Time when the request was sent, in ticks
+		ostime_t ticksRequestSent = lmicTimeReference.tLocal;
+		uint32_t requestDelaySec = osticks2ms(ticksNow - ticksRequestSent) / 1000;
+		newTime += requestDelaySec;
+
+		// time effective update is done by instance (polymorphism)
+		LMICWrapper::_node->updateSystemTime(newTime);
+		LMICWrapper::_node->_lastNetworkTimeSync = newTime;
+	}
 
 	/*
 	 * Set ADR
 	 */
-	virtual void initLMIC(u4_t network, bool adr = true) {
+	virtual void initLMIC(u4_t network = 0, bool adr = true) {
 		LMIC_setAdrMode(adr ? 1 : 0);
+	}
+
+	/*
+	 * Main LMIC job callback
+	 */
+	static void jobCallback(osjob_t* job) { 
+		LMICWrapper::_node->performJob(job); 
 	}
 
 	/*
@@ -308,10 +415,28 @@ protected:
 	}
 
 	/*
+	 * This method should be called to get the network time
+	 * update done by call to virtual method updateSystemTime(uint32_t)
+	 */
+	virtual void requestNetworkTime() {
+		LMIC_requestNetworkTime(LMICWrapper::networkTimeCallback, nullptr);
+	} 
+
+	/*
 	 * Calls LMIC_setTxData2() if message to send
+	 * request a network time update if delay exceeded
 	 */
 	virtual void lmicSend() {
-		if (UpstreamMessage* msg = _messages.backPtr(); msg != nullptr) {
+		UpstreamMessage* msg = _messages.backPtr(); 
+		if (msg != nullptr) {
+			#if defined(LMIC_ENABLE_DeviceTimeReq)
+			if ( _joined) {
+				uint32_t now = osticks2ms(os_getTime()) / 1000;
+				if (_lastNetworkTimeSync == 0 ||  (_lastNetworkTimeSync + _networkTimeSyncDelay) < now) {
+					requestNetworkTime();
+				}
+			}
+			#endif
 			LMIC_setTxData2(1, msg->_buf, msg->_len, msg->_ackRequested);
 		} 
 	}
@@ -360,16 +485,17 @@ protected:
 	 *  removes sent message from the FIFO to avoid another transmission
 	 */
 	virtual void txComplete() {
-		if (UpstreamMessage *sent = _messages.backPtr(); sent != nullptr) {
+		UpstreamMessage *sent = _messages.backPtr(); 
+		if (sent != nullptr) {
 			if (isTxCompleted(*sent, (LMIC.txrxFlags & TXRX_NACK) == 0)) {
 				_messages.pop_back(); // message is removed from FIFO
 			}
 		}
-		// RX1 or RX2 ?
+		// check if downlink message (RX Window)
 		if (LMIC.dataLen > 0) {
-			pb_byte_t buf[MAX_FRAME_LEN];
+			uint8_t buf[MAX_FRAME_LEN];
 			for (uint8_t i = 0; i < LMIC.dataLen; i++) {
-				buf[i] = (pb_byte_t)LMIC.frame[LMIC.dataBeg + i];
+				buf[i] = (uint8_t)LMIC.frame[LMIC.dataBeg + i];
 			}
 			downlinkReceived(DownstreamMessage(buf, LMIC.dataLen));
 		}
@@ -397,64 +523,15 @@ protected:
  */
 LMICWrapper * LMICWrapper::_node = nullptr;
 
+}
+}
+
 /*
  * LMIC callbacks
  * call delegation to LMICWrapper singleton
  */
-void os_getArtEui (u1_t* buf) 	{ memcpy_P(buf, LMICWrapper::_node->_env._appEUI, 8);}
-void os_getDevEui (u1_t* buf) 	{ memcpy_P(buf, LMICWrapper::_node->_env._devEUI, 8);}
-void os_getDevKey (u1_t* buf) 	{ memcpy_P(buf, LMICWrapper::_node->_env._appKEY, 16);}
-void onEvent(ev_t ev) 			{ LMICWrapper::_node->onEvent(ev); }
-void do_it(osjob_t* j) 			{ LMICWrapper::_node->performJob(j); }
+void os_getArtEui (u1_t* buf) 	{ memcpy_P(buf, leuville::lora::LMICWrapper::_node->_env._appEUI, 8);}
+void os_getDevEui (u1_t* buf) 	{ memcpy_P(buf, leuville::lora::LMICWrapper::_node->_env._devEUI, 8);}
+void os_getDevKey (u1_t* buf) 	{ memcpy_P(buf, leuville::lora::LMICWrapper::_node->_env._appKEY, 16);}
+void onEvent(ev_t ev) 			{ leuville::lora::LMICWrapper::_node->onEvent(ev); }
 
-/*
- * Encodes src object using nanopb into dest
- */
-template<typename PBType>
-size_t encode(const PBType & src, const pb_msgdesc_t * fields, Message & dest) {
-	pb_ostream_t stream = pb_ostream_from_buffer(dest._buf, arrayCapacity(dest._buf));
-	if (pb_encode(&stream, fields, &src)) {
-		dest._len = stream.bytes_written;
-	}
-	else {
-		dest._len = 0;
-	}
-	return dest._len;
-}
-
-/*
- * Builds dest object using nanopb from src raw message
- */
-template <typename PBType>
-bool decode(const Message& src, const pb_msgdesc_t* fields, PBType & dest) {
-	pb_istream_t stream = pb_istream_from_buffer(src._buf, src._len);
-	return pb_decode(&stream, fields, &dest);
-}
-
-/*
- * ENDNODE abstract base class with ProtocolBuffer (nanopb) mechanisms
- * U = uplink message nanopb type
- * D = downlink message nanopb type
- */
-template <typename U, const pb_msgdesc_t* UFIELDS, typename D, const pb_msgdesc_t* DFIELDS>
-class ProtobufEndnode: public LMICWrapper {
-public:
-
-	using LMICWrapper::LMICWrapper;
-	
-	/*
-	 * Build an UpstreamMessage filled with encoded bytes from payload
-	 * This message is stored in the double-ended queue managed by LMICWrapper.
-	 * Back of this deque is sent after call to runLoopOnce()
-	 *
-	 * fields parameter provides the way to send partial message
-	 */
-	virtual void send(const U & payload, bool ackRequested = true, const pb_msgdesc_t* fields = UFIELDS) {
-		UpstreamMessage upMessage;
-		upMessage._ackRequested = ackRequested;
-		if (encode(payload, fields, upMessage)) {
-			LMICWrapper::send(upMessage);
-		}
-	}
-
-};
