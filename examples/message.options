@@ -1,3 +1,0 @@
-leuville.Uplink.battery		int_size:8
-
-leuville.Downlink.pingDelay	int_size:16

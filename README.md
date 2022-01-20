@@ -10,7 +10,7 @@ The classes in this library are normally intended to be used inside a class that
 
  - LMIC (any of these implementations)
 	 - arduino port: [https://github.com/matthijskooijman/arduino-lmic](https://github.com/matthijskooijman/arduino-lmic)
-	 - MCCI release: [https://github.com/mcci-catena/arduino-lmic](https://github.com/mcci-catena/arduino-lmic), version 2.X (for unknown reason, version 3.X does not work - investigations on the way)
+	 - MCCI release: [https://github.com/mcci-catena/arduino-lmic](https://github.com/mcci-catena/arduino-lmic)
  - Nanopb: C implementation of Google's [Protocol Buffers](http://code.google.com/apis/protocolbuffers/) data format targeted for 32 bit microcontrollers [https://github.com/nanopb/nanopb](https://github.com/nanopb/nanopb)
  - leuville-arduino_utilities: various Arduino programming utilities [https://github.com/leuville/leuville-arduino-utilities](https://github.com/leuville/leuville-arduino-utilities)
 
@@ -94,33 +94,27 @@ This platformio.ini sample shows how to compile using VSCode + PlatformIO plugin
     board = adafruit_feather_m0
     framework = arduino
     lib_deps = 
-        leuville-common-init=C:\Dev\Arduino\LO_libraries\leuville-common-init
-        Nanopb@0.4.1
-        MCCI LoRaWAN LMIC library@2.3.2 ; 3.1.0 bug ?
+        Nanopb
+        MCCI LoRaWAN LMIC library
         RTCZero
         Adafruit Unified Sensor
         Adafruit BME680 Library
         Wire
+        https://github.com/leuville/leuville-arduino-lmic-easy
+        https://github.com/leuville/leuville-arduino-utilities
     lib_extra_dirs = 
-        C:\Dev\Arduino\LO_libraries
-        C:\Dev\Arduino\extra_libraries
+    ;    C:\Dev\Arduino\LO_libraries
+    ;    C:\Dev\Arduino\extra_libraries
     build_flags =
-        -D ARDUINO_SAMD_FEATHER_M0
-        -D ARDUINO_LMIC_PROJECT_CONFIG_H_SUPPRESS
-        -D LMIC_LORAWAN_SPEC_VERSION=LMIC_LORAWAN_SPEC_VERSION_1_0_2
-        -D CFG_eu868
-        -D CFG_sx1276_radio
-        -D DISABLE_PING
-        -D DISABLE_BEACONS
-        -D USE_ORIGINAL_AES
-        -D LMIC_USE_INTERRUPTS
-
- 
-
-
-<!--stackedit_data:
-eyJoaXN0b3J5IjpbMTM3MjU5MjA0OCwxMjMwODM3NTgyLDE4MD
-k4NzY3NjAsODQzOTI1OTcyLC0zNzg1NjQ2MCwtMjQ2NTcxOTc2
-LC0yMDYzMTA5NjY3LC0xNzEwNzM3MDYyLDY2NjI0MDk4MywxNz
-YyMDE3NzIxLC0xNzM4NzQ3Mzk2LC01MzUzNjE5MDRdfQ==
--->
+	-std=c++17
+	-D ARDUINO_LMIC_PROJECT_CONFIG_H_SUPPRESS
+	-D LMIC_LORAWAN_SPEC_VERSION=LMIC_LORAWAN_SPEC_VERSION_1_0_3
+	-D CFG_eu868
+	-D CFG_sx1276_radio
+	-D DISABLE_PING
+	-D DISABLE_BEACONS
+	-D USE_ORIGINAL_AES
+	-D LMIC_USE_INTERRUPTS
+	-D LMIC_ENABLE_long_messages
+	-D LMIC_ENABLE_DeviceTimeReq
+	-D LMIC_ENABLE_arbitrary_clock_error
