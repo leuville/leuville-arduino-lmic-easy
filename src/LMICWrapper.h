@@ -10,13 +10,12 @@
 
 #pragma once
 
-#include <fixed-deque.h>
-
 #include <Arduino_lmic.h>
 #include <hal/hal.h>
 #include <lmic/oslmic.h>
 
 #include <misc-util.h>
+#include <fixed-deque.h>
 
 #ifndef LEUVILLE_LORA_QUEUE_LEN
 #define LEUVILLE_LORA_QUEUE_LEN 10
@@ -80,10 +79,10 @@ struct OTAAId {
  * LoRaWan session keys
  */
 struct LoRaWanSessionKeys {
-	u4_t _netId = 0;
-    devaddr_t _devAddr = 0;
-    u1_t _nwkSKey[16] = { 0 };
-    u1_t _appSKey [16] = { 0 };
+	u4_t 		_netId = 0;
+    devaddr_t 	_devAddr = 0;
+    u1_t 		_nwkSKey[16] = { 0 };
+    u1_t 		_appSKey [16] = { 0 };
 
 	void set() {
 		LMIC_getSessionKeys(&_netId, &_devAddr, _nwkSKey, _appSKey);
@@ -117,14 +116,18 @@ void initLMICChannels(LMICChannel *channels, u1_t nb) {
 constexpr uint8_t MAX_MESSAGE_LEN = MAX_FRAME_LEN;
 
 struct Message {
-	uint8_t _buf[MAX_MESSAGE_LEN] = { 0 };
-	uint8_t _len = 0;
+	uint8_t 		_buf[MAX_MESSAGE_LEN] = { 0 };
+	uint8_t 		_len = 0;
+	u1_t 			_txrxFlags = 0;	// set after send or receive
 
 	Message() {}
-	Message(uint8_t* buf, uint8_t len)
-		: _len(len)
+	Message(uint8_t* buf, uint8_t len, u1_t txrxFlags = 0)
+		: _len(len), _txrxFlags(txrxFlags)
 	{
 		memcpy(_buf, buf, _len);
+	}
+	bool isAcknowledged() const {
+		return (_txrxFlags & TXRX_ACK) != 0;
 	}
 };
 
@@ -132,10 +135,12 @@ struct Message {
  * UpStream message = message buffer + ack request
  */
 struct UpstreamMessage : Message {
-	bool _ackRequested = false;
+	bool 			_ackRequested = false;
+	lmic_tx_error_t _lmicTxError = 0; // set after send 
+
 	UpstreamMessage() {}
-	UpstreamMessage(uint8_t* buf, uint8_t len, bool ackRequested = false)
-		: Message(buf, len), _ackRequested(ackRequested)
+	UpstreamMessage(uint8_t* buf, uint8_t len, bool ackRequested = false, u1_t txrxFlags = 0, lmic_tx_error_t lmicTxError = 0)
+		: Message(buf, len, txrxFlags), _ackRequested(ackRequested), _lmicTxError(lmicTxError)
 	{}
 };
 
@@ -146,12 +151,8 @@ struct DownstreamMessage : Message {
 	using Message::Message;
 };
 
-/*
- * forward declarations
- */
-void onEvent(ev_t ev);
-
-constexpr uint32_t defaultNetworkTimeSyncDelay = 24 * 60 * 60;
+// forward for friendship
+void onLMICEvent(void *pUserData, ev_t ev);
 
 /*
  * LMIC base class
@@ -168,17 +169,16 @@ public:
 		KEEP_OLD 	= LMICdeque::KEEP_BACK
 	};
 
-	friend void ::onEvent(ev_t ev);
+	friend void leuville::lora::onLMICEvent(void *pUserData, ev_t ev);
 	friend void ::os_getArtEui(u1_t* buf);
 	friend void ::os_getDevEui(u1_t* buf);
 	friend void ::os_getDevKey(u1_t* buf);
 
 	/*
-	 * The device send a network time sync request on a regular basis 
-	 * (if networkTimeSyncDelay is not zero )
+	 * Constructor
 	 */
-	LMICWrapper(const lmic_pinmap *pinmap, uint32_t networkTimeSyncDelay = defaultNetworkTimeSyncDelay, uint8_t policy = KEEP_RECENT)
-		: _pinmap(pinmap), _messages(policy), _networkTimeSyncDelay(networkTimeSyncDelay)
+	LMICWrapper(const lmic_pinmap *pinmap,  uint8_t policy = KEEP_RECENT)
+		: _pinmap(pinmap), _messages(policy)
 	{
 		LMICWrapper::_node = this;
 	}
@@ -191,22 +191,24 @@ public:
 	virtual void begin(const OTAAId& env, u4_t network, bool adr = true) {
 		_env = env;
 		os_init_ex(_pinmap);
+		LMIC_registerEventCb(&leuville::lora::onLMICEvent, nullptr);
 		LMIC_reset();
 		initLMIC(network, adr);
 	}
 
 	/*
 	 * Add a job to the callback list managed by LMIC
-	 * if interval == 0 then callback is set with os_setCallback()
-	 * else callback is set with os_setTimedCallback()
 	 *
 	 * interval = number of milliseconds from now
 	 * exec time = current time + interval
 	 */
 	virtual void setCallback(osjob_t* job, unsigned long interval = 0) final {
 		_sendJobRequested = (job == & _sendJob);
+		auto now = os_getTime();
+		auto when = now + ms2osticks(interval);
+		when = (job == &_sendJob ? max(now + ms2osticks(dutyCycleWaitTimeInterval()),when) : when);
 		_jobCount += 1;
-		os_setTimedCallback(job, os_getTime() + ms2osticks(interval), LMICWrapper::jobCallback);
+		os_setTimedCallback(job, when, LMICWrapper::jobCallback);
 	}
 
 	virtual void setCallback(osjob_t& job, unsigned long interval = 0) final {
@@ -217,14 +219,12 @@ public:
 	 * Clear a callback job
 	 */
 	virtual void unsetCallback(osjob_t* job) final {
+		_jobCount -= 1;
 		os_clearCallback(job);
 	}
 
-	/*
-	 * Check if a callback job is registered
-	 */
-	virtual bool hasCallback(osjob_t* job) final {
-		return os_jobIsTimed(job);
+	virtual void unsetCallback(osjob_t& job) final {
+		unsetCallback(&job);
 	}
 
 	/*
@@ -234,7 +234,7 @@ public:
 	 * Returns a number of ms
 	 */
 	unsigned long dutyCycleWaitTimeInterval() {
-		unsigned long now = millis();
+		unsigned long now = osticks2ms(os_getTime());
 		unsigned long when = osticks2ms(LMIC.globalDutyAvail);
 		when = (when <= now ? 0 : when-now);  
 		return when;
@@ -242,13 +242,10 @@ public:
 
 	/*
 	 * Must be called from loop()
-	 *
-	 * Register a sendJob callback if needed (messages waiting to be sent)
 	 */
 	virtual void runLoopOnce() final {
-		// if msg pending and LMIC doing nothing -> create a new LMIC job
 		if (!_sendJobRequested && hasMessageToSend() && !isRadioBusy()) {
-			setCallback(&_sendJob, dutyCycleWaitTimeInterval());
+			setCallback(&_sendJob);
 		}
 		os_runloop_once();
 	}
@@ -268,7 +265,7 @@ public:
 	 * Returns true is there at least one message waiting to be sent
 	 */
 	virtual bool hasMessageToSend() {
-		return (_messages.size() > 0);
+		return(_messages.size() > 0);
 	}
 
 	/* 
@@ -282,7 +279,7 @@ public:
 	 * Returns true if LMIC radio is pending
 	 */
 	bool isRadioBusy() {
-		return (LMIC.opmode & OP_TXRXPEND) || (LMIC.opmode & OP_TXDATA);
+		return (LMIC.opmode & OP_TXRXPEND) || (LMIC.opmode & OP_TXDATA) || (LMIC.opmode & OP_POLL) || (LMIC.opmode & OP_JOINING);
 	}
 
 	/*
@@ -300,13 +297,37 @@ public:
 	}
 
 	/*
+	 * This method should be called to get the network time
+	 * update done by call to virtual method updateSystemTime(uint32_t)
+	 */
+	virtual void requestNetworkTime() {
+		#if defined(LMIC_ENABLE_DeviceTimeReq)
+		if (_joined) {
+			LMIC_requestNetworkTime(LMICWrapper::networkTimeCallback, nullptr);
+		}
+		#endif
+	} 
+
+	/*
 	 * May be overriden to update system time when network time is received
 	 */
 	virtual void updateSystemTime(uint32_t newTime) {
 	}
 
+	virtual bool isSystemTimeSynced() {
+		return _systemTimeSynced;
+	}
+
 	static LMICWrapper & node() { 
 		return *_node; 
+	}
+
+	/*
+	 * Set battery level for DevStatusAns
+	 */
+    u1_t setBatteryLevel(uint8_t percentage) {
+		auto level = MCMD_DEVS_BATT_MIN + (MCMD_DEVS_BATT_MAX - MCMD_DEVS_BATT_MIN) * percentage / 100;
+		return LMIC_setBatteryLevel(level);
 	}
 
 protected:
@@ -327,20 +348,24 @@ protected:
 	osjob_t _sendJob;
 	bool _sendJobRequested = false;
 
+	#if defined(LMIC_ENABLE_DeviceTimeReq)
+	osjob_t _timeJob;
+	#endif
+
 	// LoRaWAN JOIN done ?
 	bool _joined = false;
 
 	// FIFO messages waiting to be sent
-	LMICdeque _messages;			
+	LMICdeque _messages;		
 
-	// members to manage network time sync
-	uint32_t _lastNetworkTimeSync = 0;
-	const uint32_t _networkTimeSyncDelay = defaultNetworkTimeSyncDelay; 
+	// Got systemTime from network ?
+	bool _systemTimeSynced = false;
 
 	/*
 	 * Network time callback
 	 */
 	static void networkTimeCallback(void *paramUserUTCTime, int flagSuccess) {
+		LMICWrapper::_node->_systemTimeSynced = false;
 		if (flagSuccess == 0)
 			return;
 
@@ -374,14 +399,29 @@ protected:
 
 		// time effective update is done by instance (polymorphism)
 		LMICWrapper::_node->updateSystemTime(newTime);
-		LMICWrapper::_node->_lastNetworkTimeSync = newTime;
+		LMICWrapper::_node->_systemTimeSynced = true;
 	}
 
 	/*
-	 * Set ADR
+	 * Set ADR, channels and clock error
 	 */
 	virtual void initLMIC(u4_t network = 0, bool adr = true) {
 		LMIC_setAdrMode(adr ? 1 : 0);
+		if (!adr) {
+			#if defined(CFG_eu868)
+			LMIC_setupChannel(0, 868100000, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_CENTI);      // g-band 
+			LMIC_setupChannel(1, 868300000, DR_RANGE_MAP(DR_SF12, DR_SF7B), BAND_CENTI);      // g-band 
+			LMIC_setupChannel(2, 868500000, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_CENTI);      // g-band 
+			LMIC_setupChannel(3, 867100000, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_CENTI);      // g-band 
+			LMIC_setupChannel(4, 867300000, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_CENTI);      // g-band 
+			LMIC_setupChannel(5, 867500000, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_CENTI);      // g-band 
+			LMIC_setupChannel(6, 867700000, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_CENTI);      // g-band 
+			LMIC_setupChannel(7, 867900000, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_CENTI);      // g-band 
+			#endif
+		}
+		#if defined(CLOCK_ERROR) && defined(MAX_CLOCK_ERROR)
+		LMIC_setClockError(MAX_CLOCK_ERROR * CLOCK_ERROR / 100);
+		#endif
 	}
 
 	/*
@@ -400,9 +440,11 @@ protected:
 		_jobCount -= 1;
 		if (job == &_sendJob) {
 			_sendJobRequested = false;
-			if (!isRadioBusy()) {
-				lmicSend();
-			}
+			lmicSend();
+		#if defined(LMIC_ENABLE_DeviceTimeReq)
+		} else if (job == &_timeJob) {
+			requestNetworkTime();
+		#endif
 		} else {
 			completeJob(job);
 		}
@@ -415,42 +457,24 @@ protected:
 	}
 
 	/*
-	 * This method should be called to get the network time
-	 * update done by call to virtual method updateSystemTime(uint32_t)
-	 */
-	virtual void requestNetworkTime() {
-		LMIC_requestNetworkTime(LMICWrapper::networkTimeCallback, nullptr);
-	} 
-
-	/*
 	 * Calls LMIC_setTxData2() if message to send
 	 * request a network time update if delay exceeded
 	 */
-	virtual void lmicSend() {
-		UpstreamMessage* msg = _messages.backPtr(); 
+	virtual lmic_tx_error_t lmicSend() final {
+		if (isRadioBusy())
+			return LMIC_ERROR_TX_BUSY;
+		UpstreamMessage * msg = _messages.backPtr(); 
 		if (msg != nullptr) {
-			#if defined(LMIC_ENABLE_DeviceTimeReq)
-			if ( _joined) {
-				uint32_t now = osticks2ms(os_getTime()) / 1000;
-				if (_lastNetworkTimeSync == 0 ||  (_lastNetworkTimeSync + _networkTimeSyncDelay) < now) {
-					requestNetworkTime();
-				}
-			}
-			#endif
-			LMIC_setTxData2(1, msg->_buf, msg->_len, msg->_ackRequested);
-		} 
+			msg->_lmicTxError = LMIC_setTxData2(1, msg->_buf, msg->_len, msg->_ackRequested);
+			return msg->_lmicTxError;
+		}
+		return LMIC_ERROR_TX_FAILED;
 	}
 
 	/*
-	  * LMIC event callback
-	  * enum _ev_t { EV_SCAN_TIMEOUT=1, EV_BEACON_FOUND,
-      *       EV_BEACON_MISSED, EV_BEACON_TRACKED, EV_JOINING,
-      *       EV_JOINED, EV_RFU1, EV_JOIN_FAILED, EV_REJOIN_FAILED,
-      *       EV_TXCOMPLETE, EV_LOST_TSYNC, EV_RESET,
-      *       EV_RXCOMPLETE, EV_LINK_DEAD, EV_LINK_ALIVE, EV_SCAN_FOUND,
-      *       EV_TXSTART, EV_TXCANCELED, EV_RXSTART, EV_JOIN_TXCOMPLETE };
-	  */
-	virtual void onEvent(ev_t ev) {
+	 * LMIC event callback
+	 */
+	virtual void onUserEvent(ev_t ev) {
 		switch (ev) {
 			case EV_JOINED:
 				_joined = true;
@@ -462,11 +486,23 @@ protected:
 			case EV_RESET:
 			case EV_LINK_DEAD:
 				_joined = false;
-				_sessionKeys = LoRaWanSessionKeys();
 				joined(false);
+				#if defined(LMIC_ENABLE_DeviceTimeReq)
+				unsetCallback(&_timeJob);
+				#endif
+				unsetCallback(&_sendJob);
+				LMIC_unjoinAndRejoin();
+				#if defined(LMIC_ENABLE_DeviceTimeReq)
+				_systemTimeSynced = false;
+				#endif
 				break;
 			case EV_TXCOMPLETE:
 				txComplete();
+				#if defined(LMIC_ENABLE_DeviceTimeReq)
+				if (! isSystemTimeSynced() && _joined) {
+					setCallback(&_timeJob);
+				}
+				#endif
 				break;
 			default:
 				break;
@@ -477,35 +513,50 @@ protected:
 	 * Called if endnode is joined or not
 	 * May be overriden
 	 */
-	virtual void joined(bool) {}
+	virtual void joined(bool ok) {
+	}
 
 	/*
 	 * Called by onEvent() calback
 	 *
-	 *  removes sent message from the FIFO to avoid another transmission
+	 * removes sent message from the FIFO to avoid another transmission
 	 */
-	virtual void txComplete() {
-		UpstreamMessage *sent = _messages.backPtr(); 
-		if (sent != nullptr) {
-			if (isTxCompleted(*sent, (LMIC.txrxFlags & TXRX_NACK) == 0)) {
+	virtual void txComplete() { 
+		UpstreamMessage *ptr = _messages.backPtr();
+		if (ptr != nullptr) {
+			ptr->_txrxFlags = LMIC.txrxFlags;
+			if (isTxCompleted(*ptr)) {
 				_messages.pop_back(); // message is removed from FIFO
 			}
 		}
-		// check if downlink message (RX Window)
-		if (LMIC.dataLen > 0) {
+		// check if downlink message (RX Window) or MAC command
+		if (isMACCommand(LMIC.frame)) {  
+			macCommandReceived(LMIC.frame);
+		} else if (LMIC.dataLen > 0) {
 			uint8_t buf[MAX_FRAME_LEN];
 			for (uint8_t i = 0; i < LMIC.dataLen; i++) {
 				buf[i] = (uint8_t)LMIC.frame[LMIC.dataBeg + i];
 			}
-			downlinkReceived(DownstreamMessage(buf, LMIC.dataLen));
-		}
+			downlinkReceived(DownstreamMessage(buf, LMIC.dataLen, LMIC.txrxFlags));
+		} 
+	}
+
+	/*
+	 * Check if frame is MAC command 
+	 */
+	virtual bool isMACCommand(uint8_t *frame) {
+		uint8_t fctrl = frame[5];
+		uint8_t foptsLen = fctrl & 0x0F;
+	    uint8_t fportIndex = 8 + foptsLen;
+    	uint8_t fport = frame[fportIndex];
+		return (fport == 0) || (foptsLen > 0); 
 	}
 
 	/*
 	 * Default send completion policy
 	 */
-	virtual bool isTxCompleted(const UpstreamMessage & message, bool ack) {
-		return ack;
+	virtual bool isTxCompleted(const UpstreamMessage & message) {
+		return message._ackRequested ? message.isAcknowledged() : true;
 	};
 
 	/*
@@ -516,12 +567,144 @@ protected:
 	virtual void downlinkReceived(const DownstreamMessage&) {
 	}
 
+	/*
+	 * MAC request arrival callback
+	 * 
+	 * Override if needed
+	 */
+	virtual void macCommandReceived(uint8_t *frame) {
+		#if defined(LMIC_DEBUG_LEVEL) && LMIC_DEBUG_LEVEL > 0
+		decodeFOpts(LMIC.frame);
+		#endif
+	}
+
+	#if defined(LMIC_DEBUG_LEVEL) && LMIC_DEBUG_LEVEL > 0
+	String _evNames[21] = {
+		"zero",
+		"EV_SCAN_TIMEOUT", "EV_BEACON_FOUND",
+		"EV_BEACON_MISSED", "EV_BEACON_TRACKED", "EV_JOINING",
+		"EV_JOINED", "EV_RFU1", "EV_JOIN_FAILED", "EV_REJOIN_FAILED",
+		"EV_TXCOMPLETE", "EV_LOST_TSYNC", "EV_RESET",
+		"EV_RXCOMPLETE", "EV_LINK_DEAD", "EV_LINK_ALIVE", "EV_SCAN_FOUND",
+		"EV_TXSTART", "EV_TXCANCELED", "EV_RXSTART", "EV_JOIN_TXCOMPLETE"
+	};
+
+	const char* getMACCommandName(uint8_t cid) {
+		switch (cid) {
+		  case 0x02: return "LinkCheckAns";
+		  case 0x03: return "LinkADRReq";
+		  case 0x04: return "DutyCycleReq";
+		  case 0x05: return "RXParamSetupReq";
+		  case 0x06: return "DevStatusAns";
+		  case 0x07: return "NewChannelReq";
+		  case 0x08: return "RXTimingSetupReq";
+		  case 0x09: return "TxParamSetupReq";
+		  case 0x0A: return "DiChannelAns";
+		  case 0x0D: return "DeviceTimeReq";
+		  case 0x10: return "PingSlotInfoReq";
+		  case 0x11: return "PingSlotChannelAns";
+		  case 0x13: return "BeaconFreqAns";
+		  default: return "Unknown / specific";
+		}
+	  }
+	  
+	void decodeFOpts(uint8_t* frame) {
+		uint8_t fctrl = frame[5];
+		uint8_t foptsLen = fctrl & 0x0F;
+		uint8_t foptsStart = 8;
+	  
+		if (foptsLen == 0) {
+		  LMIC_PRINTF_TO.println(F("No MAC commands in FOpts"));
+		  return;
+		}
+	  
+		LMIC_PRINTF_TO.print(F("FOpts ("));
+		LMIC_PRINTF_TO.print(foptsLen);
+		LMIC_PRINTF_TO.println(F(" bytes) :"));
+	  
+		uint8_t i = 0;
+		while (i < foptsLen) {
+		  uint8_t cid = frame[foptsStart + i];
+		  LMIC_PRINTF_TO.print(" → CID 0x");
+		  LMIC_PRINTF_TO.print(cid, HEX);
+		  LMIC_PRINTF_TO.print(" : ");
+		  LMIC_PRINTF_TO.println(getMACCommandName(cid));
+		  i++;
+	  
+		  // Décodage des arguments selon CID
+		  switch (cid) {
+			case 0x02: // LinkCheckAns (margin + gateway count)
+			  if (i + 1 < foptsLen) {
+				uint8_t margin = frame[foptsStart + i];
+				uint8_t gwcnt = frame[foptsStart + i + 1];
+				LMIC_PRINTF_TO.print("   Margin: "); LMIC_PRINTF_TO.println(margin);
+				LMIC_PRINTF_TO.print("   Gateways: "); LMIC_PRINTF_TO.println(gwcnt);
+				i += 2;
+			  }
+			  break;
+	  
+			case 0x03: // LinkADRReq (4 bytes)
+			  if (i + 3 < foptsLen) {
+				LMIC_PRINTF_TO.print("   DataRate_TXPower: 0x"); LMIC_PRINTF_TO.println(frame[foptsStart + i], HEX);
+				LMIC_PRINTF_TO.print("   ChMask: 0x");
+				LMIC_PRINTF_TO.print(frame[foptsStart + i+1], HEX);
+				LMIC_PRINTF_TO.print(" 0x");
+				LMIC_PRINTF_TO.println(frame[foptsStart + i+2], HEX);
+				LMIC_PRINTF_TO.print("   Redundancy: 0x"); LMIC_PRINTF_TO.println(frame[foptsStart + i+3], HEX);
+				i += 4;
+			  }
+			  break;
+	  
+			case 0x04: // DutyCycleReq (1 byte)
+			  if (i < foptsLen) {
+				LMIC_PRINTF_TO.print("   MaxDutyCycle: "); LMIC_PRINTF_TO.println(frame[foptsStart + i], HEX);
+				i += 1;
+			  }
+			  break;
+	  
+			case 0x06: // DevStatusAns (battery + margin)
+			  if (i + 1 < foptsLen) {
+				LMIC_PRINTF_TO.print("   Battery: "); LMIC_PRINTF_TO.println(frame[foptsStart + i]);
+				LMIC_PRINTF_TO.print("   Margin: "); LMIC_PRINTF_TO.println((int8_t)frame[foptsStart + i + 1]); // signed
+				i += 2;
+			  }
+			  break;
+	  
+			default:
+			  LMIC_PRINTF_TO.println("   (undefined)");
+			  break;
+		  }
+		}
+	}
+	  
+	void printLmicChannels() {
+		LMIC_PRINTF_TO.println("Active LMIC channels :");
+		for (int i = 0; i < MAX_CHANNELS; i++) {
+		  if (LMIC.channelFreq[i] != 0) {
+			uint32_t freq = LMIC.channelFreq[i];
+			LMIC_PRINTF_TO.print("Channel ");
+			LMIC_PRINTF_TO.print(i);
+			LMIC_PRINTF_TO.print(": ");
+			LMIC_PRINTF_TO.print(freq / 1000000.0, 4);
+			LMIC_PRINTF_TO.println(" MHz");
+		  }
+		}
+	}
+
+	#endif 
 };
 
 /*
  * LoRaWAN endnode singleton
  */
 LMICWrapper * LMICWrapper::_node = nullptr;
+
+/*
+ * LMIC use event callback
+ */
+void onLMICEvent(void *pUserData, ev_t ev) { 
+	LMICWrapper::_node->onUserEvent(ev); 
+}
 
 }
 }
@@ -533,5 +716,5 @@ LMICWrapper * LMICWrapper::_node = nullptr;
 void os_getArtEui (u1_t* buf) 	{ memcpy_P(buf, leuville::lora::LMICWrapper::_node->_env._appEUI, 8);}
 void os_getDevEui (u1_t* buf) 	{ memcpy_P(buf, leuville::lora::LMICWrapper::_node->_env._devEUI, 8);}
 void os_getDevKey (u1_t* buf) 	{ memcpy_P(buf, leuville::lora::LMICWrapper::_node->_env._appKEY, 16);}
-void onEvent(ev_t ev) 			{ leuville::lora::LMICWrapper::_node->onEvent(ev); }
+
 

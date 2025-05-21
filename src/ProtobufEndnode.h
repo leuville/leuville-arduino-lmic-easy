@@ -73,28 +73,21 @@ public:
 	 * Send completion policy
 	 * message is decoded to its original format
 	 */
-	virtual bool isTxCompleted(const UpstreamMessage & message, bool ack) override final {
+	virtual bool isTxCompleted(const UpstreamMessage & message) override {
 		U payload;
 		decode(message, UFIELDS, payload);
-		return isTxCompleted(payload, message._ackRequested, ack);
+		return isTxCompleted(payload, message);
 	};
 
 	/*
 	 * Default send completion policy
+	 * 
+	 * Message is decoded before
+	 * Override if needed
 	 */
-	virtual bool isTxCompleted(const U & message, bool ackRequest, bool ack) {
-		return ack;
+	virtual bool isTxCompleted(const U & message, const UpstreamMessage & rawMessage) {
+		return LMICWrapper::isTxCompleted(rawMessage);
 	};
-
-	/*
-	 * Downlink message arrival callback
-	 */
-	virtual void downlinkReceived(const DownstreamMessage& message) override final {
-		D payload;
-		if (decode(message, DFIELDS, payload)) {
-			downlinkReceived(payload);
-		}
-	}
 
 	/*
 	 * Downlink message arrival callback
@@ -102,8 +95,19 @@ public:
 	 * Message is decoded before
 	 * Override if needed
 	 */
-	virtual void downlinkReceived(const D& message) {
+	virtual void downlinkReceived(const D& message, const DownstreamMessage & rawMessage) {
 	}
+
+	/*
+	 * Downlink message arrival callback
+	 */
+	virtual void downlinkReceived(const DownstreamMessage& message) override {
+		D payload;
+		if (decode(message, DFIELDS, payload)) {
+			downlinkReceived(payload, message);
+		}
+	}
+
 };
 
 }

@@ -22,6 +22,15 @@ public:
 	using LMICWrapper::LMICWrapper;
 
     /*
+	 * Serialize Json -> String
+	 */
+	String stringFrom(const JsonDocument & doc) {
+		String message;
+		serializeJson(doc, message);
+		return message;
+	}
+
+    /*
 	 * Push a message built fron Json document to the front of the FIFO waiting queue
 	 */
 	virtual bool send(const JsonDocument & doc, bool ack = false) {
@@ -29,7 +38,7 @@ public:
         serializeJson(doc, msg);
         const char * content = msg.c_str();
         UpstreamMessage payload((uint8_t*)content, strlen(content)+1, ack);
-		return _messages.push_front(payload);
+		return LMICWrapper::send(payload);
 	}
 
 	/*
@@ -37,8 +46,8 @@ public:
      *
      * Override if needed
 	 */
-	virtual bool isTxCompleted(const JsonDocument & doc, bool ack) {
-		return ack;
+	virtual bool isTxCompleted(const JsonDocument & doc, const UpstreamMessage & rawMessage) {
+		return LMICWrapper::isTxCompleted(rawMessage);
 	};
 
 	/*
@@ -46,21 +55,21 @@ public:
      *
      * Override if needed
 	 */
-	virtual void downlinkReceived(const JsonDocument &) {
+	virtual void downlinkReceived(const JsonDocument & message, const DownstreamMessage & rawMessage) {
 	}
 
 protected:
 
-	virtual bool isTxCompleted(const UpstreamMessage & message, bool ack) override final {
+	virtual bool isTxCompleted(const UpstreamMessage & message) override final {
         JsonDocument doc;
         deserializeJson(doc, message._buf);
-		return isTxCompleted(doc, ack);
+		return isTxCompleted(doc, message);
 	};
 
 	virtual void downlinkReceived(const DownstreamMessage & message) override final {
         JsonDocument doc;
         deserializeJson(doc, message._buf);
-        downlinkReceived(doc);
+        downlinkReceived(doc, message);
 	}
 
 };
