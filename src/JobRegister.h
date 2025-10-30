@@ -2,8 +2,8 @@
 
 #include <Arduino.h>
 #include <lmic.h>
-#include <functor.h>
-#include <fixed-map.h>
+#include <MemberFunction.h>
+#include <ArrayMap.h>
 
 namespace lstl = leuville::simple_template_library;
 using namespace lstl;
@@ -27,7 +27,7 @@ class JobRegister {
     private:
 
         osjob_t                                     _jobs[SIZ];
-        mapArray<osjob_t*, Callback<T>, false, SIZ> _callbacks;
+        ArrayMap<osjob_t*, Callback<T>, false, SIZ> _callbacks;
 
     public:
 

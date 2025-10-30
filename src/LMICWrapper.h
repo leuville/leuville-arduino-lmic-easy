@@ -15,7 +15,8 @@
 #include <lmic/oslmic.h>
 
 #include <misc-util.h>
-#include <fixed-deque.h>
+#include <Range.h>
+#include <ArrayDeque.h>
 
 #ifndef LEUVILLE_LORA_QUEUE_LEN
 #define LEUVILLE_LORA_QUEUE_LEN 10
@@ -151,6 +152,11 @@ struct DownstreamMessage : Message {
 	using Message::Message;
 };
 
+constexpr uint32_t _1mn = 60;
+constexpr uint32_t _1h 	= 60 * _1mn;
+constexpr uint32_t _24h = 24 * _1h;
+constexpr uint32_t _7d 	= 7 * _24h;
+
 // forward for friendship
 void onLMICEvent(void *pUserData, ev_t ev);
 
@@ -162,7 +168,14 @@ void onLMICEvent(void *pUserData, ev_t ev);
 class LMICWrapper {
 public:
 
-	using LMICdeque = deque<UpstreamMessage, true, LEUVILLE_LORA_QUEUE_LEN>;
+	/*
+	 * Returns singleton
+	 */
+	static LMICWrapper & node() { 
+		return *_node; 
+	}
+
+	using LMICdeque = ArrayDeque<UpstreamMessage, true, LEUVILLE_LORA_QUEUE_LEN>;
 
 	enum {
 		KEEP_RECENT	= LMICdeque::KEEP_FRONT,
@@ -242,12 +255,18 @@ public:
 
 	/*
 	 * Must be called from loop()
+	 *
+	 * setup a job to send message if needed
+	 * put radio to sleep if nothing to do
 	 */
 	virtual void runLoopOnce() final {
 		if (!_sendJobRequested && hasMessageToSend() && !isRadioBusy()) {
 			setCallback(&_sendJob);
 		}
 		os_runloop_once();
+		if (isReadyForStandby()) {
+			os_radio(RADIO_RST);
+		}
 	}
 
 	/*
@@ -288,7 +307,7 @@ public:
 	virtual bool isReadyForStandby() {
 		return _joined && (_jobCount == 0) && !hasMessageToSend() && !isRadioBusy();
 	}
-
+	
 	/*
 	 * Returns LoRaWan session keys (netid, netaddr, nwskey, appskey) 
 	 */
@@ -296,38 +315,75 @@ public:
 		return _sessionKeys;
 	}
 
+	//----------------------------------------------- LMIC_ENABLE_DeviceTimeReq ---------------------------------------------------------
+	#if defined(LMIC_ENABLE_DeviceTimeReq)
 	/*
 	 * This method should be called to get the network time
 	 * update done by call to virtual method updateSystemTime(uint32_t)
 	 */
-	virtual void requestNetworkTime() {
-		#if defined(LMIC_ENABLE_DeviceTimeReq)
+	virtual void requestNetworkTime() {		
 		if (_joined) {
 			LMIC_requestNetworkTime(LMICWrapper::networkTimeCallback, nullptr);
 		}
-		#endif
 	} 
 
 	/*
 	 * May be overriden to update system time when network time is received
 	 */
-	virtual void updateSystemTime(uint32_t newTime) {
+	virtual void updateSystemTime(uint32_t networkTime) {
 	}
 
+	/*
+	 * Returns true is system time has been synced with network time less than a given delay
+	 */
 	virtual bool isSystemTimeSynced() {
-		return _systemTimeSynced;
+		return systemTimeAge() < _24h;
 	}
 
-	static LMICWrapper & node() { 
-		return *_node; 
+	/*
+	 * Returns when the system time has been given a chance to be updated by network time
+     *
+	 * ie last time a DeviceTimeReq received a successful answer
+	 */
+	virtual uint32_t systemTimeAge() {
+		return (_networkTimeSyncTicks == 0 ? UINT32_MAX : osticks2ms(os_getTime() - _networkTimeSyncTicks) / 1000);
+	}
+	#endif
+	//----------------------------------------------- LMIC_ENABLE_DeviceTimeReq ---------------------------------------------------------
+
+	/*
+	 * Set battery level for DevStatusAns
+	 *
+	 */ 
+	template <typename T>
+	u1_t setBatteryLevel(const RangedValue<T> & value) {
+		return LMIC_setBatteryLevel(scaleValue(value, Range<u1_t>{MCMD_DEVS_BATT_MIN, MCMD_DEVS_BATT_MAX}));
 	}
 
 	/*
 	 * Set battery level for DevStatusAns
+	 *
+	 * level expected to be between MCMD_DEVS_BATT_MIN and MCMD_DEVS_BATT_MAX
 	 */
-    u1_t setBatteryLevel(uint8_t percentage) {
-		auto level = MCMD_DEVS_BATT_MIN + (MCMD_DEVS_BATT_MAX - MCMD_DEVS_BATT_MIN) * percentage / 100;
-		return LMIC_setBatteryLevel(level);
+	u1_t setLoraBatteryLevel(u1_t level) {
+		if (level >= MCMD_DEVS_BATT_MIN && level <= MCMD_DEVS_BATT_MAX)
+			return LMIC_setBatteryLevel(level);
+		else
+			return setNoPowerInfo();
+	}
+
+	/*
+	 * Set battery level for DevStatusAns : MCMD_DEVS_EXT_POWER
+	 */
+	u1_t setExternalPower() {
+		return LMIC_setBatteryLevel(MCMD_DEVS_EXT_POWER);
+	}
+
+	/*
+	 * Set battery level for DevStatusAns : MCMD_DEVS_BATT_NOINFO
+	 */
+	u1_t setNoPowerInfo() {
+		return LMIC_setBatteryLevel(MCMD_DEVS_BATT_NOINFO);
 	}
 
 protected:
@@ -348,24 +404,23 @@ protected:
 	osjob_t _sendJob;
 	bool _sendJobRequested = false;
 
-	#if defined(LMIC_ENABLE_DeviceTimeReq)
-	osjob_t _timeJob;
-	#endif
-
 	// LoRaWAN JOIN done ?
 	bool _joined = false;
 
 	// FIFO messages waiting to be sent
 	LMICdeque _messages;		
 
-	// Got systemTime from network ?
-	bool _systemTimeSynced = false;
+	//----------------------------------------------- LMIC_ENABLE_DeviceTimeReq ---------------------------------------------------------
+	#if defined(LMIC_ENABLE_DeviceTimeReq)
+	osjob_t _timeJob;
+
+	// Time when the network time request was received, in ticks
+	unsigned long _networkTimeSyncTicks = 0;
 
 	/*
 	 * Network time callback
 	 */
 	static void networkTimeCallback(void *paramUserUTCTime, int flagSuccess) {
-		LMICWrapper::_node->_systemTimeSynced = false;
 		if (flagSuccess == 0)
 			return;
 
@@ -399,8 +454,10 @@ protected:
 
 		// time effective update is done by instance (polymorphism)
 		LMICWrapper::_node->updateSystemTime(newTime);
-		LMICWrapper::_node->_systemTimeSynced = true;
+		LMICWrapper::_node->_networkTimeSyncTicks = ticksNow;
 	}
+	#endif
+	//----------------------------------------------- LMIC_ENABLE_DeviceTimeReq ---------------------------------------------------------
 
 	/*
 	 * Set ADR, channels and clock error
@@ -479,6 +536,9 @@ protected:
 			case EV_JOINED:
 				_joined = true;
 				_sessionKeys.set();
+				#if defined(LMIC_ENABLE_DeviceTimeReq)
+				requestNetworkTime();
+				#endif 
 				joined(true);
 				break;
 			case EV_JOIN_FAILED:
@@ -492,9 +552,6 @@ protected:
 				#endif
 				unsetCallback(&_sendJob);
 				LMIC_unjoinAndRejoin();
-				#if defined(LMIC_ENABLE_DeviceTimeReq)
-				_systemTimeSynced = false;
-				#endif
 				break;
 			case EV_TXCOMPLETE:
 				txComplete();
