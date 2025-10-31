@@ -175,6 +175,9 @@ public:
 		return *_node; 
 	}
 
+	// for battery management
+	const Range<u1_t> _rangeLora {MCMD_DEVS_BATT_MIN, MCMD_DEVS_BATT_MAX};
+
 	using LMICdeque = ArrayDeque<UpstreamMessage, true, LEUVILLE_LORA_QUEUE_LEN>;
 
 	enum {
@@ -356,8 +359,10 @@ public:
 	 *
 	 */ 
 	template <typename T>
-	u1_t setBatteryLevel(const RangedValue<T> & value) {
-		return LMIC_setBatteryLevel(scaleValue(value, Range<u1_t>{MCMD_DEVS_BATT_MIN, MCMD_DEVS_BATT_MAX}));
+	u1_t setBatteryLevel(const RangedValue<T> & rangedValue) {
+		return LMIC_setBatteryLevel(
+			scaleValue(rangedValue, _rangeLora)
+		);
 	}
 
 	/*
