@@ -176,7 +176,7 @@ public:
 	}
 
 	// for battery management
-	const Range<u1_t> _rangeLora {MCMD_DEVS_BATT_MIN, MCMD_DEVS_BATT_MAX};
+	static constexpr Range<u1_t> _rangeLora {MCMD_DEVS_BATT_MIN, MCMD_DEVS_BATT_MAX};
 
 	using LMICdeque = ArrayDeque<UpstreamMessage, true, LEUVILLE_LORA_QUEUE_LEN>;
 
