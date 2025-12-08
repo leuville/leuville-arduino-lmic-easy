@@ -291,6 +291,13 @@ public:
 	}
 
 	/* 
+	 * returns number of messages waiting to be sent
+	 */
+	virtual uint8_t messagesPendingCount() {
+		return _messages.size();
+	}
+	
+	/* 
 	 * Start JOIN sequence
 	 */
 	virtual void startJoining() {

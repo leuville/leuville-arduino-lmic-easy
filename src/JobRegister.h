@@ -43,6 +43,14 @@ class JobRegister {
             return _callbacks[job];
         }
 
+        bool tryExec(osjob_t * job) {
+            if (auto pair = _callbacks.get(job)) {
+                pair->_value();
+                return true;
+            }
+            return false;
+        }
+
         /*
          * iterator to get all jobs stored into the register
          */
