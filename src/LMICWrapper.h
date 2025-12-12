@@ -15,6 +15,7 @@
 #include <lmic/oslmic.h>
 
 #include <misc-util.h>
+#include <safe-math.h>
 #include <Range.h>
 #include <ArrayDeque.h>
 
@@ -176,7 +177,7 @@ public:
 	}
 
 	// for battery management
-	static constexpr Range<u1_t> _rangeLora {MCMD_DEVS_BATT_MIN, MCMD_DEVS_BATT_MAX};
+	Range<u1_t> _rangeLora {MCMD_DEVS_BATT_MIN, MCMD_DEVS_BATT_MAX};
 
 	using LMICdeque = ArrayDeque<UpstreamMessage, true, LEUVILLE_LORA_QUEUE_LEN>;
 
@@ -196,8 +197,15 @@ public:
 	LMICWrapper(const lmic_pinmap *pinmap,  uint8_t policy = KEEP_RECENT)
 		: _pinmap(pinmap), _messages(policy)
 	{
+		if (LMICWrapper::_node != nullptr) {
+			exit(1);
+		}
 		LMICWrapper::_node = this;
 	}
+
+	LMICWrapper(const lmic_pinmap &pinmap, uint8_t policy = KEEP_RECENT)
+		: LMICWrapper(&pinmap, policy) 
+	{}
 
 	virtual ~LMICWrapper() = default;
 
