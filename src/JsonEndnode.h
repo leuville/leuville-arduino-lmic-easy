@@ -37,7 +37,7 @@ public:
         String msg;
         serializeJson(doc, msg);
         const char * content = msg.c_str();
-        UpstreamMessage payload((uint8_t*)content, strlen(content)+1, ack);
+        UpstreamMessage payload((uint8_t*)content, strlen(content), ack);
 		return LMICWrapper::send(payload);
 	}
 

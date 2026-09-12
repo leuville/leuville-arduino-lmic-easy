@@ -58,8 +58,8 @@ public:
 	 * Send CayenneLPP message
 	 */
 	virtual bool send(const CayenneLPP & doc, bool ack = false) {
-		CayenneLPP & lpp = const_cast<CayenneLPP&>(doc);
-        UpstreamMessage payload(lpp.getBuffer(), lpp.getSize(), ack);
+		CayenneLPP lpp = doc;
+       	UpstreamMessage payload(lpp.getBuffer(), lpp.getSize(), ack);
 		return LMICWrapper::send(payload);
 	}
 

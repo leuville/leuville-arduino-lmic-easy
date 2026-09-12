@@ -18,9 +18,14 @@
 #include <safe-math.h>
 #include <Range.h>
 #include <ArrayDeque.h>
+#include <ArrayMap.h>
 
 #ifndef LEUVILLE_LORA_QUEUE_LEN
 #define LEUVILLE_LORA_QUEUE_LEN 10
+#endif
+
+#ifndef LEUVILLE_LORA_MAX_JOBS
+#define LEUVILLE_LORA_MAX_JOBS 12
 #endif
 
 namespace lstl = leuville::simple_template_library;
@@ -217,6 +222,7 @@ public:
 		os_init_ex(_pinmap);
 		LMIC_registerEventCb(&leuville::lora::onLMICEvent, nullptr);
 		LMIC_reset();
+		restoreState();
 		initLMIC(network, adr);
 	}
 
@@ -227,11 +233,17 @@ public:
 	 * exec time = current time + interval
 	 */
 	virtual void setCallback(osjob_t* job, unsigned long interval = 0) final {
-		_sendJobRequested = (job == & _sendJob);
+		os_clearCallback(job);
+
+		if (!markJobScheduled(job))
+			return;
+
+		if (job == &_sendJob)
+			_sendJobRequested = true;
+
 		auto now = os_getTime();
 		auto when = now + ms2osticks(interval);
-		when = (job == &_sendJob ? max(now + ms2osticks(dutyCycleWaitTimeInterval()),when) : when);
-		_jobCount += 1;
+
 		os_setTimedCallback(job, when, LMICWrapper::jobCallback);
 	}
 
@@ -243,25 +255,12 @@ public:
 	 * Clear a callback job
 	 */
 	virtual void unsetCallback(osjob_t* job) final {
-		_jobCount -= 1;
 		os_clearCallback(job);
+		markJobCompleted(job);
 	}
 
 	virtual void unsetCallback(osjob_t& job) final {
 		unsetCallback(&job);
-	}
-
-	/*
-	 * Return the time interval you have to wait to be able to send a message
-	 * according to the duty cycle.
-	 * 
-	 * Returns a number of ms
-	 */
-	unsigned long dutyCycleWaitTimeInterval() {
-		unsigned long now = osticks2ms(os_getTime());
-		unsigned long when = osticks2ms(LMIC.globalDutyAvail);
-		when = (when <= now ? 0 : when-now);  
-		return when;
 	}
 
 	/*
@@ -419,7 +418,10 @@ protected:
 	LoRaWanSessionKeys _sessionKeys;
 
 	// active osjob counter
-	int _jobCount = 0;
+	uint8_t _jobCount = 0;
+
+	// osjob_t* -> scheduled ?
+	ArrayMap<osjob_t*, bool, true, LEUVILLE_LORA_MAX_JOBS> _jobs;
 
 	osjob_t _sendJob;
 	bool _sendJobRequested = false;
@@ -429,6 +431,49 @@ protected:
 
 	// FIFO messages waiting to be sent
 	LMICdeque _messages;		
+
+	/*
+	 * Mark LMIC job as scheduled and update _jobCount
+	 */
+	virtual bool markJobScheduled(osjob_t* job) final {
+		if (job == nullptr)
+			return false;
+
+		if (_jobs.contains(job)) {
+			if (!_jobs[job]) {
+				_jobs[job] = true;
+				_jobCount += 1;
+			}
+			return true;
+		}
+
+		if (!_jobs.put(job, true))
+			return false;
+
+		_jobCount += 1;
+		return true;
+	}
+
+	/*
+	 * Mark LMIC job as completed and update _jobCount
+	 */
+	virtual bool markJobCompleted(osjob_t* job) final {
+		if (job == nullptr)
+			return false;
+
+		if (!_jobs.contains(job))
+			return false;
+
+		if (_jobs[job]) {
+			_jobs[job] = false;
+			if (_jobCount > 0)
+				_jobCount -= 1;
+			else
+				_jobCount = 0;
+		}
+
+		return true;
+	}
 
 	//----------------------------------------------- LMIC_ENABLE_DeviceTimeReq ---------------------------------------------------------
 	#if defined(LMIC_ENABLE_DeviceTimeReq)
@@ -480,6 +525,23 @@ protected:
 	//----------------------------------------------- LMIC_ENABLE_DeviceTimeReq ---------------------------------------------------------
 
 	/*
+	 * Method called by begin()
+	 * May be useful to restore LMIC data like LMIC.seqnoUp 
+	 */
+	virtual void restoreState() {
+		// TO OVERRIDE
+	}
+
+	/*
+	 * Method called by runloopOnce() before standby.
+	 * May be useful to save LMIC data like LMIC.seqnoUp or session keys.
+	 * (!) Use this with care with flash memory as this will reduce the remaining flash-write-cycles.
+	 */
+	virtual void saveState() {
+		// TO OVERRIDE
+	}
+
+	/*
 	 * Set ADR, channels and clock error
 	 */
 	virtual void initLMIC(u4_t network = 0, bool adr = true) {
@@ -514,7 +576,8 @@ protected:
 	 * If other callbacks are used, override completeJob()
 	 */
 	virtual void performJob(osjob_t* job) final {
-		_jobCount -= 1;
+		markJobCompleted(job);
+
 		if (job == &_sendJob) {
 			_sendJobRequested = false;
 			lmicSend();
@@ -538,8 +601,22 @@ protected:
 	 * request a network time update if delay exceeded
 	 */
 	virtual lmic_tx_error_t lmicSend() final {
-		if (isRadioBusy())
+		if (isRadioBusy()) {
+			#if defined(LMIC_DEBUG_LEVEL) && LMIC_DEBUG_LEVEL > 0
+			LMIC_PRINTF_TO.print("lmicSend RadioBusy(), now=");
+			LMIC_PRINTF_TO.print(os_getTime());
+
+			LMIC_PRINTF_TO.print(" globalDuty=");
+			LMIC_PRINTF_TO.print(LMIC.globalDutyAvail);
+
+			LMIC_PRINTF_TO.print(" txend=");
+			LMIC_PRINTF_TO.print(LMIC.txend);
+
+			LMIC_PRINTF_TO.print(" opmode=");
+			LMIC_PRINTF_TO.println(LMIC.opmode, HEX);
+			#endif
 			return LMIC_ERROR_TX_BUSY;
+		}
 		UpstreamMessage * msg = _messages.backPtr(); 
 		if (msg != nullptr) {
 			msg->_lmicTxError = LMIC_setTxData2(1, msg->_buf, msg->_len, msg->_ackRequested);
@@ -574,12 +651,12 @@ protected:
 				LMIC_unjoinAndRejoin();
 				break;
 			case EV_TXCOMPLETE:
-				txComplete();
 				#if defined(LMIC_ENABLE_DeviceTimeReq)
 				if (! isSystemTimeSynced() && _joined) {
 					setCallback(&_timeJob);
 				}
 				#endif
+				txComplete();
 				break;
 			default:
 				break;
